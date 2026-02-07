@@ -1,5 +1,5 @@
-import db from "@calcom/prisma";
-
+import db, { prisma } from "@calcom/prisma";
+import { captureException } from "@sentry/nextjs";
 import type { IUsersRepository } from "./users.repository.interface";
 
 export class UsersRepository implements IUsersRepository {
@@ -11,7 +11,25 @@ export class UsersRepository implements IUsersRepository {
       });
       return user;
     } catch (err) {
-      const captureException = (await import("@sentry/nextjs")).captureException;
+      captureException(err);
+      throw err;
+    }
+  }
+
+  async findUserTeams(userId: number): Promise<{ teams: { teamId: number }[] } | null> {
+    try {
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          teams: {
+            select: {
+              teamId: true,
+            },
+          },
+        },
+      });
+      return user;
+    } catch (err) {
       captureException(err);
       throw err;
     }

@@ -2,9 +2,10 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
+import { Dialog } from "@calcom/features/components/controlled-dialog";
 import { useLocale } from "@calcom/lib/hooks/useLocale";
 import { Button } from "@calcom/ui/components/button";
-import { Dialog, DialogContent, DialogFooter, DialogClose } from "@calcom/ui/components/dialog";
+import { DialogContent, DialogFooter, DialogClose } from "@calcom/ui/components/dialog";
 import { Form } from "@calcom/ui/components/form";
 import { CheckboxField } from "@calcom/ui/components/form";
 
@@ -58,7 +59,7 @@ export function BulkEditDefaultForEventsModal({
               callback: () => props.setOpen(false),
             });
           }}>
-          <div className="flex flex-col space-y-2">
+          <div className="flex flex-col stack-y-2">
             {eventTypes.length > 0 && (
               <div className="flex items-center space-x-2 rounded-md px-3 pb-2.5 pt-1">
                 <CheckboxField
@@ -72,7 +73,7 @@ export function BulkEditDefaultForEventsModal({
               </div>
             )}
             {eventTypes.map((eventType) => (
-              <div key={eventType.id} className="bg-muted flex items-center space-x-2 rounded-md px-3 py-2.5">
+              <div key={eventType.id} className="bg-cal-muted flex items-center space-x-2 rounded-md px-3 py-2.5">
                 <CheckboxField
                   description={eventType.title}
                   descriptionAsLabel

@@ -2,7 +2,8 @@ import classNames from "classnames";
 import type { PropsWithChildren } from "react";
 import React from "react";
 
-import { Dialog, DialogContent } from "@calcom/ui/components/dialog";
+import { Dialog } from "@calcom/features/components/controlled-dialog";
+import { DialogContent } from "@calcom/ui/components/dialog";
 
 export default function ModalContainer(
   props: PropsWithChildren<{
@@ -24,7 +25,7 @@ export default function ModalContainer(
                 "sm:w-full sm:max-w-lg ": !props.wide,
                 "sm:w-4xl sm:max-w-4xl": props.wide,
                 "overflow-auto": props.scroll,
-                "!p-0": props.noPadding,
+                "p-0!": props.noPadding,
               }
             )}>
             {props.children}

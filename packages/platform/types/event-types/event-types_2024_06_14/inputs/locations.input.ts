@@ -1,11 +1,11 @@
 import { BadRequestException } from "@nestjs/common";
 import { ApiProperty as DocsProperty } from "@nestjs/swagger";
 import { plainToInstance } from "class-transformer";
-import { IsString, IsUrl, IsIn, IsPhoneNumber, IsBoolean } from "class-validator";
+import { IsString, IsUrl, IsIn, IsPhoneNumber, IsBoolean, MinLength } from "class-validator";
 import type { ValidationOptions, ValidatorConstraintInterface } from "class-validator";
 import { registerDecorator, validate, ValidatorConstraint } from "class-validator";
 
-export const inputLocations = [
+export const eventTypeInputLocations = [
   "address",
   "link",
   "integration",
@@ -17,11 +17,12 @@ export const inputLocations = [
 ] as const;
 
 export class InputAddressLocation_2024_06_14 {
-  @IsIn(inputLocations)
+  @IsIn(eventTypeInputLocations)
   @DocsProperty({ example: "address", description: "only allowed value for type is `address`" })
   type!: "address";
 
   @IsString()
+  @MinLength(1)
   @DocsProperty({ example: "123 Example St, City, Country" })
   address!: string;
 
@@ -31,7 +32,7 @@ export class InputAddressLocation_2024_06_14 {
 }
 
 export class InputOrganizersDefaultApp_2024_06_14 {
-  @IsIn(inputLocations)
+  @IsIn(eventTypeInputLocations)
   @DocsProperty({
     example: "organizersDefaultApp",
     description: "only allowed value for type is `organizersDefaultApp`",
@@ -40,7 +41,7 @@ export class InputOrganizersDefaultApp_2024_06_14 {
 }
 
 export class InputLinkLocation_2024_06_14 {
-  @IsIn(inputLocations)
+  @IsIn(eventTypeInputLocations)
   @DocsProperty({ example: "link", description: "only allowed value for type is `link`" })
   type!: "link";
 
@@ -53,21 +54,51 @@ export class InputLinkLocation_2024_06_14 {
   public!: boolean;
 }
 
-export const supportedIntegrations = ["cal-video", "google-meet", "office365-video", "zoom"] as const;
-export type Integration_2024_06_14 = (typeof supportedIntegrations)[number];
+export const eventTypeSupportedIntegrations = [
+  "cal-video",
+  "google-meet",
+  "zoom",
+  "whereby-video",
+  "whatsapp-video",
+  "webex-video",
+  "telegram-video",
+  "tandem",
+  "sylaps-video",
+  "skype-video",
+  "sirius-video",
+  "signal-video",
+  "shimmer-video",
+  "salesroom-video",
+  "roam-video",
+  "riverside-video",
+  "ping-video",
+  "office365-video",
+  "mirotalk-video",
+  "jitsi",
+  "jelly-video",
+  "jelly-conferencing",
+  "huddle",
+  "facetime-video",
+  "element-call-video",
+  "eightxeight-video",
+  "discord-video",
+  "demodesk-video",
+  "campfire-video",
+] as const;
+export type Integration_2024_06_14 = (typeof eventTypeSupportedIntegrations)[number];
 
 export class InputIntegrationLocation_2024_06_14 {
-  @IsIn(inputLocations)
+  @IsIn(eventTypeInputLocations)
   @DocsProperty({ example: "integration", description: "only allowed value for type is `integration`" })
   type!: "integration";
 
-  @IsIn(supportedIntegrations)
-  @DocsProperty({ example: supportedIntegrations[0], enum: supportedIntegrations })
+  @IsIn(eventTypeSupportedIntegrations)
+  @DocsProperty({ example: eventTypeSupportedIntegrations[0], enum: eventTypeSupportedIntegrations })
   integration!: Integration_2024_06_14;
 }
 
 export class InputPhoneLocation_2024_06_14 {
-  @IsIn(inputLocations)
+  @IsIn(eventTypeInputLocations)
   @DocsProperty({ example: "phone", description: "only allowed value for type is `phone`" })
   type!: "phone";
 
@@ -81,7 +112,7 @@ export class InputPhoneLocation_2024_06_14 {
 }
 
 export class InputAttendeeAddressLocation_2024_06_14 {
-  @IsIn(inputLocations)
+  @IsIn(eventTypeInputLocations)
   @DocsProperty({
     example: "attendeeAddress",
     description: "only allowed value for type is `attendeeAddress`",
@@ -89,13 +120,13 @@ export class InputAttendeeAddressLocation_2024_06_14 {
   type!: "attendeeAddress";
 }
 export class InputAttendeePhoneLocation_2024_06_14 {
-  @IsIn(inputLocations)
+  @IsIn(eventTypeInputLocations)
   @DocsProperty({ example: "attendeePhone", description: "only allowed value for type is `attendeePhone`" })
   type!: "attendeePhone";
 }
 
 export class InputAttendeeDefinedLocation_2024_06_14 {
-  @IsIn(inputLocations)
+  @IsIn(eventTypeInputLocations)
   @DocsProperty({
     example: "attendeeDefined",
     description: "only allowed value for type is `attendeeDefined`",
@@ -136,6 +167,10 @@ class InputLocationValidator_2024_06_14 implements ValidatorConstraintInterface 
     }
 
     for (const location of locations) {
+      if (!location || typeof location !== "object") {
+        throw new BadRequestException(`Each object in 'locations' must be an object.`);
+      }
+
       const { type } = location;
       if (!type) {
         throw new BadRequestException(`Each object in 'locations' must have a 'type' property.`);
@@ -187,6 +222,10 @@ class InputTeamLocationValidator_2024_06_14 implements ValidatorConstraintInterf
     }
 
     for (const location of locations) {
+      if (!location || typeof location !== "object") {
+        throw new BadRequestException(`Each object in 'locations' must be an object.`);
+      }
+
       const { type } = location;
       if (!type) {
         throw new BadRequestException(`Each object in 'locations' must have a 'type' property.`);

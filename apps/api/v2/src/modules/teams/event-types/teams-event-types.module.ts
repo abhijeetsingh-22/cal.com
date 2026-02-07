@@ -1,5 +1,8 @@
+import { Module } from "@nestjs/common";
 import { EventTypesModule_2024_06_14 } from "@/ee/event-types/event-types_2024_06_14/event-types.module";
+import { ConferencingRepository } from "@/modules/conferencing/repositories/conferencing.repository";
 import { MembershipsModule } from "@/modules/memberships/memberships.module";
+import { OrganizationsConferencingModule } from "@/modules/organizations/conferencing/organizations-conferencing.module";
 import { OutputTeamEventTypesResponsePipe } from "@/modules/organizations/event-types/pipes/team-event-types-response.transformer";
 import { InputOrganizationsEventTypesService } from "@/modules/organizations/event-types/services/input.service";
 import { OutputOrganizationsEventTypesService } from "@/modules/organizations/event-types/services/output.service";
@@ -11,7 +14,6 @@ import { TeamsEventTypesService } from "@/modules/teams/event-types/services/tea
 import { TeamsEventTypesRepository } from "@/modules/teams/event-types/teams-event-types.repository";
 import { TeamsModule } from "@/modules/teams/teams/teams.module";
 import { UsersModule } from "@/modules/users/users.module";
-import { Module } from "@nestjs/common";
 
 @Module({
   imports: [
@@ -21,6 +23,7 @@ import { Module } from "@nestjs/common";
     EventTypesModule_2024_06_14,
     UsersModule,
     TeamsModule,
+    OrganizationsConferencingModule,
   ],
   providers: [
     TeamsEventTypesRepository,
@@ -29,6 +32,7 @@ import { Module } from "@nestjs/common";
     OrganizationsTeamsRepository,
     OutputTeamEventTypesResponsePipe,
     OutputOrganizationsEventTypesService,
+    ConferencingRepository,
   ],
   exports: [TeamsEventTypesRepository, TeamsEventTypesService],
   controllers: [TeamsEventTypesController],

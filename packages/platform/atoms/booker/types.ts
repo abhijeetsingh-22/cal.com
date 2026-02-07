@@ -1,16 +1,24 @@
 import type { BookerProps } from "@calcom/features/bookings/Booker";
-import type { BookerStore } from "@calcom/features/bookings/Booker/store";
-import type { Timezone } from "@calcom/features/bookings/Booker/types";
+import type { BookerStore, CountryCode } from "@calcom/features/bookings/Booker/store";
+import type { Timezone, VIEW_TYPE } from "@calcom/features/bookings/Booker/types";
+import type { BookingCreateBody } from "@calcom/features/bookings/lib/bookingCreateBodySchema";
 import type { BookingResponse } from "@calcom/platform-libraries";
 import type {
-  ApiSuccessResponse,
   ApiErrorResponse,
+  ApiSuccessResponse,
   ApiSuccessResponseWithoutData,
   RoutingFormSearchParams,
 } from "@calcom/platform-types";
-import type { BookerLayouts } from "@calcom/prisma/zod-utils";
-
+import type React from "react";
 import type { UseCreateBookingInput } from "../hooks/bookings/useCreateBooking";
+
+export type Slot = {
+  time: string;
+  userIds?: number[];
+  attendees?: number;
+  bookingUid?: string;
+  users?: string[];
+};
 
 // Type that includes only the data values from BookerStore (excluding functions)
 export type BookerStoreValues = Omit<
@@ -29,7 +37,7 @@ export type BookerStoreValues = Omit<
   | "setSelectedDuration"
   | "setBookingData"
   | "setRecurringEventCount"
-  | "setOccurenceCount"
+  | "setRecurringEventCountQueryParam"
   | "setTentativeSelectedTimeslots"
   | "setSelectedTimeslot"
   | "setFormValues"
@@ -55,6 +63,7 @@ export type BookerPlatformWrapperAtomProps = Omit<
     rescheduleReason?: string;
   } & Record<string, string | string[]>;
   handleCreateBooking?: (input: UseCreateBookingInput) => void;
+  handleCreateRecurringBooking?: (input: BookingCreateBody[]) => void;
   onCreateBookingSuccess?: (data: ApiSuccessResponse<BookingResponse>) => void;
   onCreateBookingError?: (data: ApiErrorResponse | Error) => void;
   onCreateRecurringBookingSuccess?: (data: ApiSuccessResponse<BookingResponse[]>) => void;
@@ -66,6 +75,7 @@ export type BookerPlatformWrapperAtomProps = Omit<
   onDeleteSlotSuccess?: (data: ApiSuccessResponseWithoutData) => void;
   onDeleteSlotError?: (data: ApiErrorResponse) => void;
   onBookerStateChange?: (state: BookerStoreValues) => void;
+  handleSlotReservation?: (timeslot: string) => void;
   locationUrl?: string;
   view?: VIEW_TYPE;
   metadata?: Record<string, string>;
@@ -77,9 +87,15 @@ export type BookerPlatformWrapperAtomProps = Omit<
   confirmButtonDisabled?: boolean;
   timeZones?: Timezone[];
   isBookingDryRun?: boolean;
+  eventMetaChildren?: React.ReactNode;
+  onTimeslotsLoaded?: (slots: Record<string, Slot[]>) => void;
+  startTime?: string | Date;
+  roundRobinHideOrgAndTeam?: boolean;
+  silentlyHandleCalendarFailures?: boolean;
+  hideEventMetadata?: boolean;
+  defaultPhoneCountry?: CountryCode;
+  hideOrgTeamAvatar?: boolean;
 };
-
-type VIEW_TYPE = keyof typeof BookerLayouts;
 
 export type BookerPlatformWrapperAtomPropsForIndividual = BookerPlatformWrapperAtomProps & {
   username: string | string[];
@@ -92,4 +108,28 @@ export type BookerPlatformWrapperAtomPropsForTeam = BookerPlatformWrapperAtomPro
   isTeamEvent: true;
   teamId: number;
   routingFormSearchParams?: RoutingFormSearchParams;
+  rrHostSubsetIds?: number[];
+};
+
+type SlotInfo = {
+  time: string;
+  attendees?: number;
+  bookingUid?: string;
+  away?: boolean;
+  fromUser?: {
+    id: number;
+    displayName: string | null;
+  };
+  toUser?: {
+    id: number;
+    username: string | null;
+    displayName: string | null;
+  };
+  reason?: string;
+  emoji?: string;
+  showNotePublicly?: boolean;
+};
+
+export type GetAvailableSlotsResponse = {
+  slots: Record<string, SlotInfo[]>;
 };

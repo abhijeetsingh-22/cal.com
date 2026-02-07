@@ -1,5 +1,5 @@
-import getApps from "@calcom/app-store/utils";
-import { getUsersCredentials } from "@calcom/lib/server/getUsersCredentials";
+import { getUsersCredentialsIncludeServiceAccountKey } from "@calcom/app-store/delegationCredential";
+import getApps, { sanitizeAppForViewer } from "@calcom/app-store/utils";
 import type { TrpcSessionUser } from "@calcom/trpc/server/types";
 
 import { TRPCError } from "@trpc/server";
@@ -16,17 +16,17 @@ type AppByIdOptions = {
 export const appByIdHandler = async ({ ctx, input }: AppByIdOptions) => {
   const { user } = ctx;
   const appId = input.appId;
-  const credentials = await getUsersCredentials(user);
+  // getApps need credentials with service account key, but we are filtering credentials out already before returning from this fn
+  const credentials = await getUsersCredentialsIncludeServiceAccountKey(user);
   const apps = getApps(credentials);
   const appFromDb = apps.find((app) => app.slug === appId);
   if (!appFromDb) {
     throw new TRPCError({ code: "BAD_REQUEST", message: `Could not find app ${appId}` });
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const { credential: _, credentials: _1, ...app } = appFromDb;
+  const safeApp = sanitizeAppForViewer(appFromDb);
   return {
     isInstalled: appFromDb.credentials.length,
-    ...app,
+    ...safeApp,
   };
 };

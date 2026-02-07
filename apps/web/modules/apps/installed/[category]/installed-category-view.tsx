@@ -3,15 +3,16 @@
 import { useReducer } from "react";
 
 import getAppCategoryTitle from "@calcom/app-store/_utils/getAppCategoryTitle";
-import { AppList, type HandleDisconnect } from "@calcom/features/apps/components/AppList";
-import type { UpdateUsersDefaultConferencingAppParams } from "@calcom/features/apps/components/AppSetDefaultLinkDialog";
+import { AppList, type HandleDisconnect } from "@calcom/web/modules/apps/components/AppList";
+import type { UpdateUsersDefaultConferencingAppParams } from "@calcom/web/modules/apps/components/AppSetDefaultLinkDialog";
 import DisconnectIntegrationModal from "@calcom/features/apps/components/DisconnectIntegrationModal";
 import type { RemoveAppParams } from "@calcom/features/apps/components/DisconnectIntegrationModal";
-import { SkeletonLoader } from "@calcom/features/apps/components/SkeletonLoader";
+import { SkeletonLoader } from "@calcom/web/modules/apps/components/SkeletonLoader";
 import type { BulkUpdatParams } from "@calcom/features/eventtypes/components/BulkEditDefaultForEventsModal";
 import { useLocale } from "@calcom/lib/hooks/useLocale";
 import { AppCategories } from "@calcom/prisma/enums";
 import { trpc } from "@calcom/trpc/react";
+import type { RouterOutputs } from "@calcom/trpc/react";
 import { Button } from "@calcom/ui/components/button";
 import { EmptyScreen } from "@calcom/ui/components/empty-screen";
 import type { Icon } from "@calcom/ui/components/icon";
@@ -181,9 +182,11 @@ type ModalState = {
 
 type PageProps = {
   category: AppCategories;
+  connectedCalendars: RouterOutputs["viewer"]["calendars"]["connectedCalendars"];
+  installedCalendars: RouterOutputs["viewer"]["apps"]["integrations"];
 };
 
-export default function InstalledApps({ category }: PageProps) {
+export default function InstalledApps({ category, connectedCalendars, installedCalendars }: PageProps) {
   const { t } = useLocale();
   const utils = trpc.useUtils();
   const categoryList: AppCategories[] = Object.values(AppCategories).filter((category) => {
@@ -207,7 +210,7 @@ export default function InstalledApps({ category }: PageProps) {
     updateData({ isOpen: true, credentialId, teamId });
   };
 
-  const deleteCredentialMutation = trpc.viewer.deleteCredential.useMutation();
+  const deleteCredentialMutation = trpc.viewer.credentials.delete.useMutation();
 
   const handleRemoveApp = ({ credentialId, teamId, callback }: RemoveAppParams) => {
     deleteCredentialMutation.mutate(
@@ -217,7 +220,7 @@ export default function InstalledApps({ category }: PageProps) {
           showToast(t("app_removed_successfully"), "success");
           callback();
           utils.viewer.apps.integrations.invalidate();
-          utils.viewer.connectedCalendars.invalidate();
+          utils.viewer.calendars.connectedCalendars.invalidate();
         },
         onError: () => {
           showToast(t("error_removing_app"), "error");
@@ -233,7 +236,12 @@ export default function InstalledApps({ category }: PageProps) {
         {categoryList.includes(category) && (
           <IntegrationsContainer handleDisconnect={handleDisconnect} variant={category} />
         )}
-        {category === "calendar" && <CalendarListContainer />}
+        {category === "calendar" && (
+          <CalendarListContainer
+            connectedCalendars={connectedCalendars}
+            installedCalendars={installedCalendars}
+          />
+        )}
         {category === "other" && (
           <IntegrationsContainer
             handleDisconnect={handleDisconnect}

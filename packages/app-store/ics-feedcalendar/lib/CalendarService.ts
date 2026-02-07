@@ -1,17 +1,19 @@
 /* eslint-disable @typescript-eslint/triple-slash-reference */
 /// <reference path="../../../types/ical.d.ts"/>
-import ICAL from "ical.js";
 
+import process from "node:process";
 import dayjs from "@calcom/dayjs";
 import { symmetricDecrypt } from "@calcom/lib/crypto";
 import type {
   Calendar,
-  IntegrationCalendar,
-  EventBusyDate,
   CalendarEvent,
+  EventBusyDate,
+  GetAvailabilityParams,
+  IntegrationCalendar,
   NewCalendarEventType,
 } from "@calcom/types/Calendar";
 import type { CredentialPayload } from "@calcom/types/Credential";
+import ICAL from "ical.js";
 
 // for Apple's Travel Time feature only (for now)
 const getTravelDurationInSeconds = (vevent: ICAL.Component) => {
@@ -24,7 +26,7 @@ const getTravelDurationInSeconds = (vevent: ICAL.Component) => {
     // integer validation as we can never be sure with ical.js
     if (!Number.isInteger(travelSeconds)) return 0;
     return travelSeconds;
-  } catch (e) {
+  } catch {
     return 0;
   }
 };
@@ -38,31 +40,30 @@ const applyTravelDuration = (event: ICAL.Event, seconds: number) => {
 
 const CALENDSO_ENCRYPTION_KEY = process.env.CALENDSO_ENCRYPTION_KEY || "";
 
-export default class ICSFeedCalendarService implements Calendar {
+class ICSFeedCalendarService implements Calendar {
   private urls: string[] = [];
-  private skipWriting = false;
   protected integrationName = "ics-feed_calendar";
 
   constructor(credential: CredentialPayload) {
-    const { urls, skipWriting } = JSON.parse(
-      symmetricDecrypt(credential.key as string, CALENDSO_ENCRYPTION_KEY)
-    );
+    const { urls } = JSON.parse(symmetricDecrypt(credential.key as string, CALENDSO_ENCRYPTION_KEY));
     this.urls = urls;
-    this.skipWriting = skipWriting;
   }
 
   createEvent(_event: CalendarEvent, _credentialId: number): Promise<NewCalendarEventType> {
-    if (this.skipWriting) {
-      return Promise.reject(new Error("Event creation is disabled for this calendar."));
-    }
-    throw new Error("createEvent called on read-only ICS feed");
+    console.warn("createEvent called on ICS (read-only) feed");
+    return Promise.resolve({
+      uid: _event.uid || "",
+      type: this.integrationName,
+      id: "",
+      password: "",
+      url: "",
+      additionalInfo: { calWarnings: ["ICS feed is read-only"] },
+    });
   }
 
   deleteEvent(_uid: string, _event: CalendarEvent, _externalCalendarId?: string): Promise<unknown> {
-    if (this.skipWriting) {
-      return Promise.reject(new Error("Event creation is disabled for this calendar."));
-    }
-    throw new Error("deleteEvent called on read-only ICS feed");
+    console.warn("deleteEvent called on ICS (read-only) feed");
+    return Promise.resolve();
   }
 
   updateEvent(
@@ -70,10 +71,15 @@ export default class ICSFeedCalendarService implements Calendar {
     _event: CalendarEvent,
     _externalCalendarId?: string
   ): Promise<NewCalendarEventType | NewCalendarEventType[]> {
-    if (this.skipWriting) {
-      return Promise.reject(new Error("Event creation is disabled for this calendar."));
-    }
-    throw new Error("updateEvent called on read-only ICS feed");
+    console.warn("updateEvent called on ICS (read-only) feed");
+    return Promise.resolve({
+      uid: _event.uid || "",
+      type: this.integrationName,
+      id: "",
+      password: "",
+      url: "",
+      additionalInfo: { calWarnings: ["ICS feed is read-only"] },
+    });
   }
 
   fetchCalendars = async (): Promise<{ url: string; vcalendar: ICAL.Component }[]> => {
@@ -130,11 +136,8 @@ export default class ICSFeedCalendarService implements Calendar {
     return selectedCalendars[0].userId || null;
   };
 
-  async getAvailability(
-    dateFrom: string,
-    dateTo: string,
-    selectedCalendars: IntegrationCalendar[]
-  ): Promise<EventBusyDate[]> {
+  async getAvailability(params: GetAvailabilityParams): Promise<EventBusyDate[]> {
+    const { dateFrom, dateTo, selectedCalendars } = params;
     const startISOString = new Date(dateFrom).toISOString();
 
     const calendars = await this.fetchCalendars();
@@ -142,7 +145,7 @@ export default class ICSFeedCalendarService implements Calendar {
     const userId = this.getUserId(selectedCalendars);
     // we use the userId from selectedCalendars to fetch the user's timeZone from the database primarily for all-day events without any timezone information
     const userTimeZone = userId ? await this.getUserTimezoneFromDB(userId) : "Europe/London";
-    const events: { start: string; end: string }[] = [];
+    const events: { start: string; end: string; title: string }[] = [];
 
     calendars.forEach(({ vcalendar }) => {
       const vevents = vcalendar.getAllSubcomponents("vevent");
@@ -155,11 +158,19 @@ export default class ICSFeedCalendarService implements Calendar {
         // if (vevent?.getFirstPropertyValue("transp") === "TRANSPARENT") return;
 
         const event = new ICAL.Event(vevent);
+        const title = String(vevent.getFirstPropertyValue("summary"));
+        const dtstartProperty = vevent.getFirstProperty("dtstart");
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const tzidFromDtstart = dtstartProperty ? (dtstartProperty as any).jCal[1].tzid : undefined;
+
         const dtstart: { [key: string]: string } | undefined = vevent?.getFirstPropertyValue("dtstart");
         const timezone = dtstart ? dtstart["timezone"] : undefined;
         // We check if the dtstart timezone is in UTC which is actually represented by Z instead, but not recognized as that in ICAL.js as UTC
         const isUTC = timezone === "Z";
-        const tzid: string | undefined = vevent?.getFirstPropertyValue("tzid") || isUTC ? "UTC" : timezone;
+
+        // Fix precedence: prioritize TZID from DTSTART property, then standalone TZID, then UTC, then fallback
+        const tzid: string | undefined =
+          tzidFromDtstart || vevent?.getFirstPropertyValue("tzid") || (isUTC ? "UTC" : timezone);
         // In case of icalendar, when only tzid is available without vtimezone, we need to add vtimezone explicitly to take care of timezone diff
         if (!vcalendar.getFirstSubcomponent("vtimezone")) {
           const timezoneToUse = tzid || userTimeZone;
@@ -188,7 +199,16 @@ export default class ICSFeedCalendarService implements Calendar {
             console.error("No timezone found");
           }
         }
-        const vtimezone = vcalendar.getFirstSubcomponent("vtimezone");
+
+        let vtimezone = null;
+        if (tzid) {
+          const allVtimezones = vcalendar.getAllSubcomponents("vtimezone");
+          vtimezone = allVtimezones.find((vtz) => vtz.getFirstPropertyValue("tzid") === tzid);
+        }
+
+        if (!vtimezone) {
+          vtimezone = vcalendar.getFirstSubcomponent("vtimezone");
+        }
 
         // mutate event to consider travel time
         applyTravelDuration(event, getTravelDurationInSeconds(vevent));
@@ -244,6 +264,7 @@ export default class ICSFeedCalendarService implements Calendar {
               events.push({
                 start: currentStart.toISOString(),
                 end: dayjs(currentEvent.endDate.toJSDate()).toISOString(),
+                title,
               });
             }
           }
@@ -259,9 +280,12 @@ export default class ICSFeedCalendarService implements Calendar {
           event.endDate = event.endDate.convertToZone(zone);
         }
 
+        const finalStartISO = dayjs(event.startDate.toJSDate()).toISOString();
+        const finalEndISO = dayjs(event.endDate.toJSDate()).toISOString();
         return events.push({
-          start: dayjs(event.startDate.toJSDate()).toISOString(),
-          end: dayjs(event.endDate.toJSDate()).toISOString(),
+          start: finalStartISO,
+          end: finalEndISO,
+          title,
         });
       });
     });
@@ -278,8 +302,17 @@ export default class ICSFeedCalendarService implements Calendar {
         name,
         readOnly: true,
         externalId: url,
-        integrationName: this.integrationName,
+        integration: this.integrationName,
       };
     });
   }
+}
+
+/**
+ * Factory function that creates an ICS Feed Calendar service instance.
+ * This is exported instead of the class to prevent internal types
+ * from leaking into the emitted .d.ts file.
+ */
+export default function BuildCalendarService(credential: CredentialPayload): Calendar {
+  return new ICSFeedCalendarService(credential);
 }

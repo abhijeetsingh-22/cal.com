@@ -1,22 +1,20 @@
+import { getLocale } from "@calcom/features/auth/lib/getLocale";
+import { loadTranslations } from "@calcom/lib/server/i18n";
+import { IconSprites } from "@calcom/ui/components/icon";
+import { buildLegacyRequest } from "@lib/buildLegacyCtx";
 import { dir } from "i18next";
 import { Inter } from "next/font/google";
 import localFont from "next/font/local";
-import { headers, cookies } from "next/headers";
-import React from "react";
-
-import { getLocale } from "@calcom/features/auth/lib/getLocale";
-import { IconSprites } from "@calcom/ui/components/icon";
-import { NotificationSoundHandler } from "@calcom/web/components/notification-sound-handler";
-
-import { buildLegacyCtx } from "@lib/buildLegacyCtx";
-
-import { ssrInit } from "@server/lib/ssr";
+import { cookies, headers } from "next/headers";
+import Script from "next/script";
+import type React from "react";
 
 import "../styles/globals.css";
-import { SpeculationRules } from "./SpeculationRules";
+import { AppRouterI18nProvider } from "./AppRouterI18nProvider";
 import { Providers } from "./providers";
+import { SpeculationRules } from "./SpeculationRules";
 
-const interFont = Inter({ subsets: ["latin"], variable: "--font-inter", preload: true, display: "swap" });
+const interFont = Inter({ subsets: ["latin"], variable: "--font-sans", preload: true, display: "swap" });
 const calFont = localFont({
   src: "../fonts/CalSans-SemiBold.woff2",
   variable: "--font-cal",
@@ -45,7 +43,7 @@ export const viewport = {
 
 export const metadata = {
   icons: {
-    icon: "/favicon.ico",
+    icon: "/api/logo?type=favicon-32",
     apple: "/api/logo?type=apple-touch-icon",
     other: [
       {
@@ -80,63 +78,56 @@ export const metadata = {
   },
 };
 
-const getInitialProps = async (url: string) => {
-  const { pathname, searchParams } = new URL(url);
+const getInitialProps = async () => {
+  const h = await headers();
+  const isEmbed = h.get("x-isEmbed") === "true";
+  const embedColorScheme = h.get("x-embedColorScheme");
+  const newLocale = (await getLocale(buildLegacyRequest(await headers(), await cookies()))) ?? "en";
+  const direction = dir(newLocale) ?? "ltr";
 
-  const isEmbed = pathname.endsWith("/embed") || (searchParams?.get("embedType") ?? null) !== null;
-  const embedColorScheme = searchParams?.get("ui.color-scheme");
-
-  const req = { headers: await headers(), cookies: await cookies() };
-  const newLocale = await getLocale(req);
-  const direction = dir(newLocale);
-
-  return { isEmbed, embedColorScheme, locale: newLocale, direction };
+  return {
+    isEmbed,
+    embedColorScheme,
+    locale: newLocale,
+    direction,
+  };
 };
-
-const getFallbackProps = () => ({
-  locale: "en",
-  direction: "ltr",
-  isEmbed: false,
-  embedColorScheme: false,
-});
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const h = await headers();
+  const nonce = h.get("x-csp-nonce") ?? "";
 
-  const fullUrl = h.get("x-url") ?? "";
-  const nonce = h.get("x-csp") ?? "";
+  const country = h.get("cf-ipcountry") || h.get("x-vercel-ip-country") || "Unknown";
 
-  const isSSG = !fullUrl;
+  const { locale, direction, isEmbed, embedColorScheme } = await getInitialProps();
 
-  const { locale, direction, isEmbed, embedColorScheme } = isSSG
-    ? getFallbackProps()
-    : await getInitialProps(fullUrl);
+  const ns = "common";
+  const translations = await loadTranslations(locale, ns);
 
-  const ssr = await ssrInit(buildLegacyCtx(h, await cookies(), {}, {}));
   return (
     <html
+      className="notranslate"
+      translate="no"
       lang={locale}
       dir={direction}
       style={embedColorScheme ? { colorScheme: embedColorScheme as string } : undefined}
       suppressHydrationWarning
       data-nextjs-router="app">
       <head nonce={nonce}>
-        {!!process.env.NEXT_PUBLIC_HEAD_SCRIPTS && (
-          <script
-            nonce={nonce}
-            id="injected-head-scripts"
-            // eslint-disable-next-line react/no-danger
-            dangerouslySetInnerHTML={{
-              __html: process.env.NEXT_PUBLIC_HEAD_SCRIPTS,
-            }}
-          />
-        )}
         <style>{`
           :root {
-            --font-inter: ${interFont.style.fontFamily.replace(/\'/g, "")};
+            --font-sans: ${interFont.style.fontFamily.replace(/\'/g, "")};
             --font-cal: ${calFont.style.fontFamily.replace(/\'/g, "")};
           }
         `}</style>
+        {process.env.NODE_ENV === "development" && (
+          <Script
+            src="//unpkg.com/react-grab/dist/index.global.js"
+            crossOrigin="anonymous"
+            strategy="beforeInteractive"
+            data-options='{"activationKey":"Meta+c"}'
+          />
+        )}
       </head>
       <body
         className="dark:bg-default bg-subtle antialiased"
@@ -149,22 +140,15 @@ export default async function RootLayout({ children }: { children: React.ReactNo
                 // - gives iframe the appropriate height(equal to document height) which can only be known after loading the page once in browser.
                 // - Tells iframe which mode it should be in (dark/light) - if there is a a UI instruction for that
                 visibility: "hidden",
+                // This in addition to visibility: hidden is to ensure that elements with specific opacity set are not visible
+                opacity: 0,
               }
             : {
                 visibility: "visible",
+                opacity: 1,
               }
         }>
         <IconSprites />
-        {!!process.env.NEXT_PUBLIC_BODY_SCRIPTS && (
-          <script
-            nonce={nonce}
-            id="injected-head-scripts"
-            // eslint-disable-next-line react/no-danger
-            dangerouslySetInnerHTML={{
-              __html: process.env.NEXT_PUBLIC_BODY_SCRIPTS,
-            }}
-          />
-        )}
         <SpeculationRules
           // URLs In Navigation
           prerenderPathsOnHover={[
@@ -178,9 +162,12 @@ export default async function RootLayout({ children }: { children: React.ReactNo
             "/insights",
           ]}
         />
-        <Providers dehydratedState={ssr.dehydrate()}>{children}</Providers>
-        {!isEmbed && <NotificationSoundHandler />}
-        <NotificationSoundHandler />
+
+        <Providers isEmbed={isEmbed} nonce={nonce} country={country}>
+          <AppRouterI18nProvider translations={translations} locale={locale} ns={ns}>
+            {children}
+          </AppRouterI18nProvider>
+        </Providers>
       </body>
     </html>
   );

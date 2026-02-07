@@ -6,11 +6,11 @@ import prisma from "@calcom/prisma";
 
 import getInstalledAppPath from "../../_utils/getInstalledAppPath";
 import appConfig from "../config.json";
-import { CalendarService } from "../lib";
+import { BuildCalendarService } from "../lib";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method === "POST") {
-    const { urls, skipWriting } = req.body;
+    const { urls } = req.body;
     // Get user
     const user = await prisma.user.findFirstOrThrow({
       where: {
@@ -24,18 +24,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const data = {
       type: appConfig.type,
-      key: symmetricEncrypt(JSON.stringify({ urls, skipWriting }), process.env.CALENDSO_ENCRYPTION_KEY || ""),
+      key: symmetricEncrypt(JSON.stringify({ urls }), process.env.CALENDSO_ENCRYPTION_KEY || ""),
       userId: user.id,
       teamId: null,
       appId: appConfig.slug,
       invalid: false,
+      delegationCredentialId: null,
     };
 
     try {
-      const dav = new CalendarService({
+      const dav = BuildCalendarService({
         id: 0,
         ...data,
         user: { email: user.email },
+        encryptedKey: null,
       });
       const listedCals = await dav.listCalendars();
 

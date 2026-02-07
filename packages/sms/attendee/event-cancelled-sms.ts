@@ -15,13 +15,15 @@ export default class EventCancelledSMS extends SMSManager {
     const messageText = `${t("hey_there")} ${attendee.name}, ${t("event_request_cancelled")}\n\n${t(
       "event_cancelled_subject",
       {
-        title: this.calEvent.title,
+        title: typeof this.calEvent.title === 'string' ? this.calEvent.title : 'Untitled Event',
         date: this.getFormattedDate(attendee.timeZone, attendee.language.locale),
+        interpolation: { escapeValue: false },
       }
     )}`;
 
     const urlText = t("you_can_view_booking_details_with_this_url", {
       url: bookingUrl,
+      interpolation: { escapeValue: false },
     });
 
     return `${messageText}\n\n${urlText}`;

@@ -1,7 +1,8 @@
 "use client";
 
-import React from "react";
+import { useLayoutEffect } from "react";
 
+import "@calcom/embed-core/src/embed-iframe";
 import { HttpError } from "@calcom/lib/http-error";
 import { Button } from "@calcom/ui/components/button";
 
@@ -12,6 +13,7 @@ type Props = {
   /** Display debugging information */
   displayDebug?: boolean;
   children?: never;
+  reset?: () => void;
 };
 
 const defaultProps = {
@@ -53,6 +55,17 @@ const ErrorDebugPanel: React.FC<{ error: Props["error"]; children?: never }> = (
 
 export const ErrorPage: React.FC<Props> = (props) => {
   const { message, statusCode, error, displayDebug } = { ...defaultProps, ...props };
+  const handleReset = () => {
+    window.location.reload();
+    props.reset?.();
+  };
+
+  // useLayoutEffect runs synchronously before browser paint, ensuring it's set early
+  useLayoutEffect(() => {
+    if (statusCode && typeof window !== "undefined") {
+      window.CalComPageStatus = statusCode.toString();
+    }
+  }, [statusCode]);
 
   return (
     <>
@@ -71,14 +84,14 @@ export const ErrorPage: React.FC<Props> = (props) => {
             <p className="text-default mb-4 max-w-2xl text-sm">
               Please provide the following text when contacting support to better help you:
             </p>
-            <pre className="bg-emphasis text-emphasis w-full max-w-2xl whitespace-normal break-words rounded-md p-4">
+            <pre className="bg-emphasis text-emphasis w-full max-w-2xl whitespace-normal wrap-break-word rounded-md p-4">
               {message}
             </pre>
           </div>
 
           <Button href="mailto:support@cal.com">Contact Support</Button>
-          <Button color="secondary" href="javascript:history.back()" className="ml-2">
-            Go back
+          <Button color="secondary" className="ml-2" onClick={handleReset}>
+            Try again
           </Button>
         </div>
       </div>

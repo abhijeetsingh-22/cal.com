@@ -1,11 +1,13 @@
-import { getLocation, getRichDescription } from "@calcom/lib/CalEventParser";
+import { getLocation } from "@calcom/lib/CalEventParser";
 import logger from "@calcom/lib/logger";
 import prisma from "@calcom/prisma";
 import type { BufferedBusyTime } from "@calcom/types/BufferedBusyTime";
 import type {
   Calendar,
+  CalendarServiceEvent,
   CalendarEvent,
   EventBusyDate,
+  GetAvailabilityParams,
   IntegrationCalendar,
   NewCalendarEventType,
 } from "@calcom/types/Calendar";
@@ -30,7 +32,7 @@ function parseEventTime2Timestamp(eventTime: string): string {
   return String(+new Date(eventTime) / 1000);
 }
 
-export default class LarkCalendarService implements Calendar {
+class LarkCalendarService implements Calendar {
   private url = `https://${LARK_HOST}/open-apis`;
   private integrationName = "";
   private log: typeof logger;
@@ -115,7 +117,7 @@ export default class LarkCalendarService implements Calendar {
     let accessToken = "";
     try {
       accessToken = await this.auth.getToken();
-    } catch (error) {
+    } catch {
       throw new Error("get access token error");
     }
 
@@ -130,7 +132,7 @@ export default class LarkCalendarService implements Calendar {
     });
   };
 
-  async createEvent(event: CalendarEvent, credentialId: number): Promise<NewCalendarEventType> {
+  async createEvent(event: CalendarServiceEvent, credentialId: number): Promise<NewCalendarEventType> {
     let eventId = "";
     let eventRespData;
     const mainHostDestinationCalendar = event.destinationCalendar
@@ -200,7 +202,7 @@ export default class LarkCalendarService implements Calendar {
    * @param event
    * @returns
    */
-  async updateEvent(uid: string, event: CalendarEvent, externalCalendarId?: string) {
+  async updateEvent(uid: string, event: CalendarServiceEvent, externalCalendarId?: string) {
     const eventId = uid;
     let eventRespData;
     const mainHostDestinationCalendar = event.destinationCalendar?.find(
@@ -269,11 +271,8 @@ export default class LarkCalendarService implements Calendar {
     }
   }
 
-  async getAvailability(
-    dateFrom: string,
-    dateTo: string,
-    selectedCalendars: IntegrationCalendar[]
-  ): Promise<EventBusyDate[]> {
+  async getAvailability(params: GetAvailabilityParams): Promise<EventBusyDate[]> {
+    const { dateFrom, dateTo, selectedCalendars } = params;
     const selectedCalendarIds = selectedCalendars
       .filter((e) => e.integration === this.integrationName)
       .map((e) => e.externalId)
@@ -372,10 +371,10 @@ export default class LarkCalendarService implements Calendar {
     }
   };
 
-  private translateEvent = (event: CalendarEvent): LarkEvent => {
+  private translateEvent = (event: CalendarServiceEvent): LarkEvent => {
     const larkEvent: LarkEvent = {
       summary: event.title,
-      description: getRichDescription(event),
+      description: event.calendarDescription,
       start_time: {
         timestamp: parseEventTime2Timestamp(event.startTime),
         timezone: event.organizer.timeZone,
@@ -393,7 +392,14 @@ export default class LarkCalendarService implements Calendar {
       ],
     };
     if (event.location) {
-      larkEvent.location = { name: getLocation(event) };
+      larkEvent.location = {
+        name: getLocation({
+          videoCallData: event.videoCallData,
+          additionalInformation: event.additionalInformation,
+          location: event.location,
+          uid: event.uid,
+        }),
+      };
     }
     return larkEvent;
   };
@@ -423,4 +429,13 @@ export default class LarkCalendarService implements Calendar {
 
     return attendeeArray;
   };
+}
+
+/**
+ * Factory function that creates a Lark Calendar service instance.
+ * This is exported instead of the class to prevent internal types
+ * from leaking into the emitted .d.ts file.
+ */
+export default function BuildCalendarService(credential: CredentialPayload): Calendar {
+  return new LarkCalendarService(credential);
 }

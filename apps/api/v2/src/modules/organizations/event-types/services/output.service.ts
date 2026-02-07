@@ -2,10 +2,19 @@ import { OutputEventTypesService_2024_06_14 } from "@/ee/event-types/event-types
 import { TeamsEventTypesRepository } from "@/modules/teams/event-types/teams-event-types.repository";
 import { UsersRepository } from "@/modules/users/users.repository";
 import { Injectable } from "@nestjs/common";
-import type { EventType, User, Schedule, Host, DestinationCalendar } from "@prisma/client";
-import { SchedulingType, Team } from "@prisma/client";
 
-import { HostPriority, TeamEventTypeResponseHost } from "@calcom/platform-types";
+import { SchedulingType } from "@calcom/platform-libraries";
+import { EventTypeMetadata } from "@calcom/platform-libraries/event-types";
+import type { HostPriority, TeamEventTypeResponseHost } from "@calcom/platform-types";
+import type {
+  Team,
+  EventType,
+  User,
+  Schedule,
+  Host,
+  DestinationCalendar,
+  CalVideoSettings,
+} from "@calcom/prisma/client";
 
 type EventTypeRelations = {
   users: User[];
@@ -16,6 +25,7 @@ type EventTypeRelations = {
     Team,
     "bannerUrl" | "name" | "logoUrl" | "slug" | "weekStart" | "brandColor" | "darkBrandColor" | "theme"
   > | null;
+  calVideoSettings?: CalVideoSettings | null;
 };
 export type DatabaseTeamEventType = EventType & EventTypeRelations;
 
@@ -70,7 +80,23 @@ type Input = Pick<
   | "eventName"
   | "useEventTypeDestinationCalendarEmail"
   | "hideCalendarEventDetails"
+  | "hideOrganizerEmail"
   | "team"
+  | "calVideoSettings"
+  | "hidden"
+  | "bookingRequiresAuthentication"
+  | "rescheduleWithSameRoundRobinHost"
+  | "maxActiveBookingPerBookerOfferReschedule"
+  | "maxActiveBookingsPerBooker"
+  | "disableCancelling"
+  | "disableRescheduling"
+  | "minimumRescheduleNotice"
+  | "canSendCalVideoTranscriptionEmails"
+  | "interfaceLanguage"
+  | "allowReschedulingPastBookings"
+  | "allowReschedulingCancelledBookings"
+  | "showOptimizedSlots"
+  | "rrHostSubsetEnabled"
 >;
 
 @Injectable()
@@ -82,7 +108,18 @@ export class OutputOrganizationsEventTypesService {
   ) {}
 
   async getResponseTeamEventType(databaseEventType: Input, isOrgTeamEvent: boolean) {
-    const { teamId, userId, parentId, assignAllTeamMembers } = databaseEventType;
+    const metadata = this.outputEventTypesService.transformMetadata(databaseEventType.metadata);
+
+    const emailSettings = this.transformEmailSettings(metadata);
+
+    const {
+      teamId,
+      userId,
+      parentId,
+      assignAllTeamMembers,
+      rescheduleWithSameRoundRobinHost,
+      rrHostSubsetEnabled,
+    } = databaseEventType;
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { ownerId, users, ...rest } = this.outputEventTypesService.getResponseEventType(
       0,
@@ -92,7 +129,7 @@ export class OutputOrganizationsEventTypesService {
     const hosts =
       databaseEventType.schedulingType === "MANAGED"
         ? await this.getManagedEventTypeHosts(databaseEventType.id)
-        : await this.transformHosts(databaseEventType.hosts, databaseEventType.schedulingType);
+        : await this.getNonManagedEventTypeHosts(databaseEventType.hosts, databaseEventType.schedulingType);
 
     return {
       ...rest,
@@ -104,6 +141,7 @@ export class OutputOrganizationsEventTypesService {
         ? this.getResponseSchedulingType(databaseEventType.schedulingType)
         : databaseEventType.schedulingType,
       assignAllTeamMembers: teamId ? assignAllTeamMembers : undefined,
+      emailSettings,
       team: {
         id: teamId,
         name: databaseEventType?.team?.name,
@@ -115,6 +153,8 @@ export class OutputOrganizationsEventTypesService {
         darkBrandColor: databaseEventType?.team?.darkBrandColor,
         theme: databaseEventType?.team?.theme,
       },
+      rescheduleWithSameRoundRobinHost,
+      rrHostSubsetEnabled,
     };
   }
 
@@ -137,13 +177,18 @@ export class OutputOrganizationsEventTypesService {
     for (const child of children) {
       if (child.userId) {
         const user = await this.usersRepository.findById(child.userId);
-        transformedHosts.push({ userId: child.userId, name: user?.name || "" });
+        transformedHosts.push({
+          userId: child.userId,
+          name: user?.name || "",
+          username: user?.username || "",
+          avatarUrl: user?.avatarUrl,
+        });
       }
     }
     return transformedHosts;
   }
 
-  async transformHosts(
+  async getNonManagedEventTypeHosts(
     databaseHosts: Host[],
     schedulingType: SchedulingType | null
   ): Promise<TeamEventTypeResponseHost[]> {
@@ -159,6 +204,7 @@ export class OutputOrganizationsEventTypesService {
         transformedHosts.push({
           userId: databaseHost.userId,
           name: databaseUser?.name || "",
+          username: databaseUser?.username || "",
           mandatory: !!databaseHost.isFixed,
           priority: getPriorityLabel(databaseHost.priority || 2),
           avatarUrl: databaseUser?.avatarUrl,
@@ -167,12 +213,30 @@ export class OutputOrganizationsEventTypesService {
         transformedHosts.push({
           userId: databaseHost.userId,
           name: databaseUser?.name || "",
+          username: databaseUser?.username || "",
           avatarUrl: databaseUser?.avatarUrl,
         });
       }
     }
 
     return transformedHosts;
+  }
+
+  private transformEmailSettings(metadata: EventTypeMetadata) {
+    if (!metadata?.disableStandardEmails?.all) {
+      return undefined;
+    }
+
+    const { attendee, host } = metadata.disableStandardEmails.all;
+
+    if (attendee !== undefined || host !== undefined) {
+      return {
+        disableEmailsToAttendees: attendee ?? false,
+        disableEmailsToHosts: host ?? false,
+      };
+    }
+
+    return undefined;
   }
 }
 

@@ -1,11 +1,10 @@
-import type { Attendee } from "@prisma/client";
-
-// eslint-disable-next-line no-restricted-imports
+ 
 import { getCalendar } from "@calcom/app-store/_utils/getCalendar";
-import { getAllDelegationCredentialsForUser } from "@calcom/lib/delegationCredential/server";
-import { getDelegationCredentialOrFindRegularCredential } from "@calcom/lib/delegationCredential/server";
-import { deleteMeeting } from "@calcom/lib/videoClient";
+import { getAllDelegationCredentialsForUserIncludeServiceAccountKey } from "@calcom/app-store/delegationCredential";
+import { getDelegationCredentialOrFindRegularCredential } from "@calcom/app-store/delegationCredential";
+import { deleteMeeting } from "@calcom/features/conferencing/lib/videoClient";
 import prisma from "@calcom/prisma";
+import type { Attendee } from "@calcom/prisma/client";
 import { BookingStatus } from "@calcom/prisma/enums";
 import type { CalendarEvent } from "@calcom/types/Calendar";
 
@@ -21,7 +20,8 @@ const lastAttendeeDeleteBooking = async (
   let deletedReferences = false;
   const bookingUser = originalRescheduledBooking?.user;
   const delegationCredentials = bookingUser
-    ? await getAllDelegationCredentialsForUser({
+    ? // We fetch delegation credentials with ServiceAccount key as CalendarService instance created later in the flow needs it
+      await getAllDelegationCredentialsForUserIncludeServiceAccountKey({
         user: { email: bookingUser.email, id: bookingUser.id },
       })
     : [];
@@ -43,7 +43,7 @@ const lastAttendeeDeleteBooking = async (
             integrationsToDelete.push(deleteMeeting(credential, reference.uid));
           }
           if (reference.type.includes("_calendar") && originalBookingEvt) {
-            const calendar = await getCalendar(credential);
+            const calendar = await getCalendar(credential, "booking");
             if (calendar) {
               integrationsToDelete.push(
                 calendar?.deleteEvent(reference.uid, originalBookingEvt, reference.externalCalendarId)

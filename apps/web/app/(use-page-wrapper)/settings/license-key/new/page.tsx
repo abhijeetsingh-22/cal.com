@@ -8,12 +8,15 @@ import type { inferSSRProps } from "@calcom/types/inferSSRProps";
 import { buildLegacyCtx } from "@lib/buildLegacyCtx";
 import { getServerSideProps } from "@lib/settings/license-key/new/getServerSideProps";
 
-import CreateANewLicenseKeyForm, { LayoutWrapper } from "~/settings/license-key/new/new-view";
+import SettingsNewView from "~/settings/license-key/new/new-view";
 
 export const generateMetadata = async () =>
   await _generateMetadata(
     (t) => t("set_up_your_organization"),
-    (t) => t("organizations_description")
+    (t) => t("organizations_description"),
+    undefined,
+    undefined,
+    "/settings/license-key/new"
   );
 
 const getData = withAppDirSsr<inferSSRProps<typeof getServerSideProps>>(getServerSideProps);
@@ -21,9 +24,7 @@ const getData = withAppDirSsr<inferSSRProps<typeof getServerSideProps>>(getServe
 const ServerPage = async ({ params, searchParams }: PageProps) => {
   await getData(buildLegacyCtx(await headers(), await cookies(), await params, await searchParams));
   return (
-    <LayoutWrapper>
-      <CreateANewLicenseKeyForm />
-    </LayoutWrapper>
+    <SettingsNewView />
   );
 };
 

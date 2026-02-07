@@ -1,11 +1,11 @@
 import { shallow } from "zustand/shallow";
 
-import { useSchedule } from "@calcom/features/schedules";
+import { useBookerStoreContext } from "@calcom/features/bookings/Booker/BookerStoreProvider";
+import { useSchedule } from "~/schedules/hooks/useSchedule";
 import { useCompatSearchParams } from "@calcom/lib/hooks/useCompatSearchParams";
 import { trpc } from "@calcom/trpc/react";
 
-import { useBookerTime } from "../components/hooks/useBookerTime";
-import { useBookerStore } from "../store";
+import { useBookerTime } from "@calcom/features/bookings/Booker/hooks/useBookerTime";
 
 export type useEventReturnType = ReturnType<typeof useEvent>;
 export type useScheduleForEventReturnType = ReturnType<typeof useScheduleForEvent>;
@@ -18,8 +18,8 @@ export type useScheduleForEventReturnType = ReturnType<typeof useScheduleForEven
  * Using this hook means you only need to use one hook, instead
  * of combining multiple conditional hooks.
  */
-export const useEvent = (props?: { fromRedirectOfNonOrgLink?: boolean }) => {
-  const [username, eventSlug, isTeamEvent, org] = useBookerStore(
+export const useEvent = (props?: { fromRedirectOfNonOrgLink?: boolean; disabled?: boolean }) => {
+  const [username, eventSlug, isTeamEvent, org] = useBookerStoreContext(
     (state) => [state.username, state.eventSlug, state.isTeamEvent, state.org],
     shallow
   );
@@ -34,7 +34,7 @@ export const useEvent = (props?: { fromRedirectOfNonOrgLink?: boolean }) => {
     },
     {
       refetchOnWindowFocus: false,
-      enabled: Boolean(username) && Boolean(eventSlug),
+      enabled: !props?.disabled && Boolean(username) && Boolean(eventSlug),
     }
   );
 
@@ -59,35 +59,42 @@ export const useEvent = (props?: { fromRedirectOfNonOrgLink?: boolean }) => {
  * this way the multi day view will show data of both months.
  */
 export const useScheduleForEvent = ({
-  prefetchNextMonth,
   username,
   eventSlug,
   eventId,
   month,
   duration,
-  monthCount,
   dayCount,
   selectedDate,
   orgSlug,
   teamMemberEmail,
   isTeamEvent,
+  useApiV2 = true,
+  bookerLayout,
 }: {
-  prefetchNextMonth?: boolean;
   username?: string | null;
   eventSlug?: string | null;
   eventId?: number | null;
   month?: string | null;
   duration?: number | null;
-  monthCount?: number;
   dayCount?: number | null;
   selectedDate?: string | null;
   orgSlug?: string;
   teamMemberEmail?: string | null;
   fromRedirectOfNonOrgLink?: boolean;
   isTeamEvent?: boolean;
-} = {}) => {
+  useApiV2?: boolean;
+  /**
+   * Required when prefetching is needed
+   */
+  bookerLayout?: {
+    layout: string;
+    extraDays: number;
+    columnViewExtraDays: { current: number };
+  };
+}) => {
   const { timezone } = useBookerTime();
-  const [usernameFromStore, eventSlugFromStore, monthFromStore, durationFromStore] = useBookerStore(
+  const [usernameFromStore, eventSlugFromStore, monthFromStore, durationFromStore] = useBookerStoreContext(
     (state) => [state.username, state.eventSlug, state.month, state.selectedDuration],
     shallow
   );
@@ -101,8 +108,6 @@ export const useScheduleForEvent = ({
     eventId,
     timezone,
     selectedDate,
-    prefetchNextMonth,
-    monthCount,
     dayCount,
     rescheduleUid,
     month: monthFromStore ?? month,
@@ -110,6 +115,8 @@ export const useScheduleForEvent = ({
     isTeamEvent,
     orgSlug,
     teamMemberEmail,
+    useApiV2: useApiV2,
+    bookerLayout,
   });
 
   return {
@@ -119,5 +126,6 @@ export const useScheduleForEvent = ({
     isSuccess: schedule?.isSuccess,
     isLoading: schedule?.isLoading,
     invalidate: schedule?.invalidate,
+    dataUpdatedAt: schedule?.dataUpdatedAt,
   };
 };

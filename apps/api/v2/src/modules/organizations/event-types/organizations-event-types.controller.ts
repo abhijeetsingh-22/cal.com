@@ -1,6 +1,11 @@
 import { CreatePhoneCallInput } from "@/ee/event-types/event-types_2024_06_14/inputs/create-phone-call.input";
 import { CreatePhoneCallOutput } from "@/ee/event-types/event-types_2024_06_14/outputs/create-phone-call.output";
 import { API_VERSIONS_VALUES } from "@/lib/api-versions";
+import {
+  OPTIONAL_API_KEY_HEADER,
+  OPTIONAL_X_CAL_CLIENT_ID_HEADER,
+  OPTIONAL_X_CAL_SECRET_KEY_HEADER,
+} from "@/lib/docs/headers";
 import { PlatformPlan } from "@/modules/auth/decorators/billing/platform-plan.decorator";
 import { GetUser } from "@/modules/auth/decorators/get-user/get-user.decorator";
 import { Roles } from "@/modules/auth/decorators/roles/roles.decorator";
@@ -34,15 +39,16 @@ import {
   HttpStatus,
   NotFoundException,
   Query,
+  Logger,
 } from "@nestjs/common";
-import { ApiOperation, ApiTags as DocsTags } from "@nestjs/swagger";
+import { ApiHeader, ApiOperation, ApiTags as DocsTags } from "@nestjs/swagger";
 
 import { ERROR_STATUS, SUCCESS_STATUS } from "@calcom/platform-constants";
 import { handleCreatePhoneCall } from "@calcom/platform-libraries";
 import {
   CreateTeamEventTypeInput_2024_06_14,
+  GetOrganizationEventTypesQuery_2024_06_14,
   GetTeamEventTypesQuery_2024_06_14,
-  SkipTakePagination,
   TeamEventTypeOutput_2024_06_14,
   UpdateTeamEventTypeInput_2024_06_14,
 } from "@calcom/platform-types";
@@ -56,8 +62,13 @@ export type EventTypeHandlerResponse = {
   path: "/v2/organizations/:orgId",
   version: API_VERSIONS_VALUES,
 })
-@DocsTags("Orgs / Event Types")
+@DocsTags("Orgs / Teams / Event Types")
+@ApiHeader(OPTIONAL_X_CAL_CLIENT_ID_HEADER)
+@ApiHeader(OPTIONAL_X_CAL_SECRET_KEY_HEADER)
+@ApiHeader(OPTIONAL_API_KEY_HEADER)
 export class OrganizationsEventTypesController {
+  private readonly logger = new Logger("OrganizationsEventTypesController");
+
   constructor(
     private readonly organizationsEventTypesService: OrganizationsEventTypesService,
     private readonly inputService: InputOrganizationsEventTypesService,
@@ -79,6 +90,10 @@ export class OrganizationsEventTypesController {
       user.id,
       teamId,
       bodyEventType
+    );
+    this.logger.debug(
+      "nl debug - create org team event type - transformedBody",
+      JSON.stringify(transformedBody, null, 2)
     );
 
     const eventType = await this.organizationsEventTypesService.createOrganizationTeamEventType(
@@ -144,12 +159,16 @@ export class OrganizationsEventTypesController {
 
   @UseGuards(IsOrgGuard, IsTeamInOrg, IsAdminAPIEnabledGuard)
   @Get("/teams/:teamId/event-types")
-  @ApiOperation({ summary: "Get a team event type" })
+  @ApiOperation({
+    summary: "Get team event types",
+    description:
+      'Use the optional `sortCreatedAt` query parameter to order results by creation date (by ID). Accepts "asc" (oldest first) or "desc" (newest first). When not provided, no explicit ordering is applied.',
+  })
   async getTeamEventTypes(
     @Param("teamId", ParseIntPipe) teamId: number,
     @Query() queryParams: GetTeamEventTypesQuery_2024_06_14
   ): Promise<GetTeamEventTypesOutput> {
-    const { eventSlug, hostsLimit } = queryParams;
+    const { eventSlug, hostsLimit, sortCreatedAt } = queryParams;
 
     if (eventSlug) {
       const eventType = await this.organizationsEventTypesService.getTeamEventTypeBySlug(
@@ -164,7 +183,7 @@ export class OrganizationsEventTypesController {
       };
     }
 
-    const eventTypes = await this.organizationsEventTypesService.getTeamEventTypes(teamId);
+    const eventTypes = await this.organizationsEventTypesService.getTeamEventTypes(teamId, sortCreatedAt);
 
     return {
       status: SUCCESS_STATUS,
@@ -176,16 +195,21 @@ export class OrganizationsEventTypesController {
   @PlatformPlan("ESSENTIALS")
   @UseGuards(ApiAuthGuard, IsOrgGuard, RolesGuard, PlatformPlanGuard, IsAdminAPIEnabledGuard)
   @Get("/teams/event-types")
-  @ApiOperation({ summary: "Get all team event types" })
+  @ApiOperation({
+    summary: "Get all team event types",
+    description:
+      'Use the optional `sortCreatedAt` query parameter to order results by creation date (by ID). Accepts "asc" (oldest first) or "desc" (newest first). When not provided, no explicit ordering is applied.',
+  })
   async getTeamsEventTypes(
     @Param("orgId", ParseIntPipe) orgId: number,
-    @Query() queryParams: SkipTakePagination
+    @Query() queryParams: GetOrganizationEventTypesQuery_2024_06_14
   ): Promise<GetTeamEventTypesOutput> {
-    const { skip, take } = queryParams;
+    const { skip, take, sortCreatedAt } = queryParams;
     const eventTypes = await this.organizationsEventTypesService.getOrganizationsTeamsEventTypes(
       orgId,
       skip,
-      take
+      take,
+      sortCreatedAt
     );
 
     return {

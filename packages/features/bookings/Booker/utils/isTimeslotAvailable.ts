@@ -1,6 +1,6 @@
 import dayjs from "@calcom/dayjs";
 
-import type { QuickAvailabilityCheck } from "../components/hooks/useSlots";
+import type { QuickAvailabilityCheck } from "../types";
 import { isSlotEquivalent, isValidISOFormat } from "./isSlotEquivalent";
 
 type Maybe<T> = T | undefined;
@@ -92,7 +92,7 @@ export const isTimeSlotAvailable = ({
   }
 
   const dateInGMT = isValidISOFormat(slotToCheckInIso) ? slotToCheckInIso.split("T")[0] : null;
-  // If the date is not in ISO format, we could errorneously consider the slot unavailable, so be on the safe side and consider it available
+  // If the date is not in ISO format, we could erroneously consider the slot unavailable, so be on the safe side and consider it available
   // Though this could be a false positive, it's better to consider the slot available than unavailable
   if (!dateInGMT) return true;
 

@@ -1,12 +1,16 @@
+import { assertSuccessfullyConfiguredInWorkspace } from "@calcom/app-store/delegationCredential";
+import { sendDelegationCredentialDisabledEmail } from "@calcom/emails/integration-email-service";
+import type { ServiceAccountKey } from "@calcom/features/delegation-credentials/repositories/DelegationCredentialRepository";
+import { DelegationCredentialRepository } from "@calcom/features/delegation-credentials/repositories/DelegationCredentialRepository";
+import logger from "@calcom/lib/logger";
+import { getTranslation } from "@calcom/lib/server/i18n";
 import type { z } from "zod";
 
-import { checkIfSuccessfullyConfiguredInWorkspace } from "@calcom/lib/delegationCredential/server";
-import { getTranslation } from "@calcom/lib/server/i18n";
-import { DelegationCredentialRepository } from "@calcom/lib/server/repository/delegationCredential";
-import type { ServiceAccountKey } from "@calcom/lib/server/repository/delegationCredential";
-
+import { getAffectedMembersForDisable } from "./getAffectedMembersForDisable.handler";
 import type { DelegationCredentialToggleEnabledSchema } from "./schema";
 import { ensureNoServiceAccountKey } from "./utils";
+
+const log = logger.getSubLogger({ prefix: ["viewer", "delegationCredential", "toggleEnabled"] });
 
 type LoggedInUser = {
   id: number;
@@ -39,17 +43,77 @@ export async function toggleDelegationCredentialEnabled(
   loggedInUser: Omit<LoggedInUser, "locale" | "emailVerified">,
   input: z.infer<typeof DelegationCredentialToggleEnabledSchema>
 ) {
-  if (input.enabled) {
+  // Fetch the current credential to check the current enabled state
+  const currentDelegationCredential = await DelegationCredentialRepository.findById({
+    id: input.id,
+  });
+
+  if (!currentDelegationCredential) {
+    throw new Error("Delegation credential not found");
+  }
+
+  if (!loggedInUser.organizationId) {
+    throw new Error("You must be part of an organization to toggle a delegation credential");
+  }
+
+  if (currentDelegationCredential.organizationId !== loggedInUser.organizationId) {
+    throw new Error("Delegation credential not found");
+  }
+
+  const shouldBeEnabled = input.enabled;
+
+  if (shouldBeEnabled === currentDelegationCredential.enabled) {
+    // Already enabled or disabled, so no need to do anything
+    return currentDelegationCredential;
+  }
+
+  if (shouldBeEnabled) {
     await assertWorkspaceConfigured({
       delegationCredentialId: input.id,
       user: loggedInUser,
     });
   }
 
+  if (!shouldBeEnabled) {
+    const affectedMemberships = await getAffectedMembersForDisable({ delegationCredentialId: input.id });
+    const slug = currentDelegationCredential.workspacePlatform?.slug;
+    if (!slug) {
+      log.error(`Delegation credential ${input.id} has no workspace platform slug`);
+    }
+
+    let calendarAppName: string;
+    let conferencingAppName: string;
+
+    if (slug === "google") {
+      calendarAppName = "Google Calendar";
+      conferencingAppName = "Google Meet";
+    } else if (slug === "office365") {
+      calendarAppName = "Microsoft 365";
+      conferencingAppName = "Microsoft Teams";
+    } else {
+      throw new Error(`Unsupported workspace platform slug: ${slug}`);
+    }
+
+    for (const membership of affectedMemberships) {
+      if (membership.email) {
+        await sendDelegationCredentialDisabledEmail({
+          recipientEmail: membership.email,
+          recipientName: membership.name || undefined,
+          calendarAppName,
+          conferencingAppName,
+        });
+      }
+    }
+  }
+
   const updatedDelegationCredential = await DelegationCredentialRepository.updateById({
     id: input.id,
     data: {
-      enabled: input.enabled,
+      enabled: shouldBeEnabled,
+      // Don't touch lastEnabledAt if we are disabling
+      lastEnabledAt: shouldBeEnabled ? new Date() : undefined,
+      // Don't touch lastDisabledAt if we are enabling
+      lastDisabledAt: shouldBeEnabled ? undefined : new Date(),
     },
   });
 
@@ -77,14 +141,10 @@ const assertWorkspaceConfigured = async ({
     throw new Error("Domain wide delegation doesn't have service account key");
   }
 
-  const isSuccessfullyConfigured = await checkIfSuccessfullyConfiguredInWorkspace({
+  await assertSuccessfullyConfiguredInWorkspace({
     delegationCredential,
     user,
   });
-
-  if (!isSuccessfullyConfigured) {
-    throw new Error("Workspace not successfully configured");
-  }
 };
 
 function hasServiceAccountKey<T extends { serviceAccountKey: ServiceAccountKey | null }>(

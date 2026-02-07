@@ -1,7 +1,9 @@
-import { lookup } from "dns";
+import { lookup } from "node:dns";
 import { type TFunction } from "i18next";
 
-import { sendAdminOrganizationNotification } from "@calcom/emails";
+import { sendAdminOrganizationNotification } from "@calcom/emails/organization-email-service";
+import { FeaturesRepository } from "@calcom/features/flags/features.repository";
+import { UserRepository } from "@calcom/features/users/repositories/UserRepository";
 import {
   RESERVED_SUBDOMAINS,
   ORG_MINIMUM_PUBLISHED_TEAMS_SELF_SERVE,
@@ -11,7 +13,6 @@ import {
 import { createDomain } from "@calcom/lib/domainManager/organization";
 import logger from "@calcom/lib/logger";
 import { safeStringify } from "@calcom/lib/safeStringify";
-import { UserRepository } from "@calcom/lib/server/repository/user";
 import { prisma } from "@calcom/prisma";
 import { UserPermissionRole } from "@calcom/prisma/enums";
 
@@ -20,37 +21,56 @@ const log = logger.getSubLogger({ prefix: ["orgCreationUtils"] });
 /**
  * We can only say for sure that the email is not a company email. We can't say for sure if it is a company email.
  */
-function isNotACompanyEmail(email: string) {
+export function isNotACompanyEmail(email: string) {
   // A list of popular @domains that can't be used to allow automatic acceptance of memberships to organization
   const emailProviders = [
     "gmail.com",
+    "googlemail.com",
     "yahoo.com",
+    "ymail.com",
+    "rocketmail.com",
+    "sbcglobal.net",
+    "att.net",
     "outlook.com",
     "hotmail.com",
+    "live.com",
+    "msn.com",
+    "outlook.co",
+    "hotmail.co.uk",
     "aol.com",
     "icloud.com",
+    "me.com",
+    "mac.com",
     "mail.com",
+    "email.com",
+    "post.com",
+    "consultant.com",
+    "myself.com",
+    "dr.com",
+    "europe.com",
+    "engineer.com",
+    "asia.com",
+    "usa.com",
     "protonmail.com",
+    "proton.me",
+    "pm.me",
+    "protonmail.ch",
     "zoho.com",
     "yandex.com",
     "gmx.com",
+    "gmx.de",
     "fastmail.com",
     "inbox.com",
-    "me.com",
     "hushmail.com",
-    "live.com",
     "rediffmail.com",
     "tutanota.com",
     "mail.ru",
-    "usa.com",
     "qq.com",
     "163.com",
+    "naver.com",
     "web.de",
-    "rocketmail.com",
     "excite.com",
     "lycos.com",
-    "outlook.co",
-    "hotmail.co.uk",
   ];
 
   const emailParts = email.split("@");
@@ -75,6 +95,7 @@ type OrgOwner = {
       slug: string | null;
       isOrganization: boolean;
     };
+    accepted: boolean;
   }[];
   completedOnboarding?: boolean;
   emailVerified?: Date | null;
@@ -183,13 +204,14 @@ export async function assertCanCreateOrg({
   restrictBasedOnMinimumPublishedTeams: boolean;
   errorOnUserAlreadyPartOfOrg?: boolean;
 }) {
-  const verifiedUser = orgOwner.completedOnboarding && !!orgOwner.emailVerified;
+  const featuresRepository = new FeaturesRepository(prisma);
+  const emailVerificationEnabled = await featuresRepository.checkIfFeatureIsEnabledGlobally(
+    "email-verification"
+  );
+
+  const verifiedUser = emailVerificationEnabled ? !!orgOwner.emailVerified : true;
   if (!verifiedUser) {
-    log.warn(
-      "you_need_to_complete_user_onboarding_before_creating_an_organization",
-      safeStringify({ userId: orgOwner.id })
-    );
-    throw new OrgCreationError("you_need_to_complete_user_onboarding_before_creating_an_organization");
+    throw new OrgCreationError("you_need_to_verify_your_email_before_creating_an_organization");
   }
 
   if (isNotACompanyEmail(orgOwner.email) && !isPlatform) {
@@ -204,8 +226,17 @@ export async function assertCanCreateOrg({
   });
 
   // Let slug verification be done before it as that gives better error message if the user creating the org is already a part of the org(i.e. the org exist and he is a member)
-  if (orgOwner.profile?.organizationId) {
+  const isPartOfAnotherOrg = !!orgOwner.profile?.organizationId;
+  if (isPartOfAnotherOrg) {
     throw new OrgCreationError("you_are_part_of_another_organization_cannot_create_organization");
+  }
+
+  // for platform Organization we don't add org profile to orgOwner so we've to check membership to check if user is part of another platform organization.
+  const isPartOfAnotherPlatformOrg = orgOwner.teams.some(
+    (membership) => membership.team.isOrganization && membership.accepted
+  );
+  if (isPartOfAnotherPlatformOrg) {
+    throw new OrgCreationError("you_are_part_of_another_platform_organization_cannot_create_organization");
   }
 
   const hasExistingPlatformOrOrgTeam = orgOwner?.teams.find((team) => {
@@ -258,6 +289,7 @@ export const findUserToBeOrgOwner = async (email: string) => {
               isPlatform: true,
             },
           },
+          accepted: true,
         },
       },
     },
@@ -267,7 +299,7 @@ export const findUserToBeOrgOwner = async (email: string) => {
     return null;
   }
 
-  return await UserRepository.enrichUserWithItsProfile({
+  return await new UserRepository(prisma).enrichUserWithItsProfile({
     user,
   });
 };

@@ -1,4 +1,6 @@
+import { CreditsRepository } from "@calcom/features/credits/repositories/CreditsRepository";
 import { sendVerificationCode } from "@calcom/features/ee/workflows/lib/reminders/verifyPhoneNumber";
+import { checkRateLimitAndThrowError } from "@calcom/lib/checkRateLimitAndThrowError";
 import hasKeyInMetadata from "@calcom/lib/hasKeyInMetadata";
 import type { TrpcSessionUser } from "@calcom/trpc/server/types";
 
@@ -17,8 +19,21 @@ type SendVerificationCodeOptions = {
 export const sendVerificationCodeHandler = async ({ ctx, input }: SendVerificationCodeOptions) => {
   const { user } = ctx;
 
+  await checkRateLimitAndThrowError({
+    identifier: `sms:verification:${user.id}`,
+    rateLimitingType: "sms",
+  });
+
+  await checkRateLimitAndThrowError({
+    identifier: `sms:verification:${user.id}`,
+    rateLimitingType: "smsMonth",
+  });
+
   const isCurrentUsernamePremium =
     user && hasKeyInMetadata(user, "isPremium") ? !!user.metadata.isPremium : false;
+
+  const creditBalance = await CreditsRepository.findCreditBalance({ userId: user.id });
+  const hasNoAdditionalCredits = !!creditBalance && creditBalance.additionalCredits <= 0;
 
   let isTeamsPlan = false;
   if (!isCurrentUsernamePremium) {
@@ -26,7 +41,7 @@ export const sendVerificationCodeHandler = async ({ ctx, input }: SendVerificati
     isTeamsPlan = !!hasTeamPlan;
   }
 
-  if (!isCurrentUsernamePremium && !isTeamsPlan) {
+  if (!isCurrentUsernamePremium && !isTeamsPlan && hasNoAdditionalCredits) {
     throw new TRPCError({ code: "UNAUTHORIZED" });
   }
 

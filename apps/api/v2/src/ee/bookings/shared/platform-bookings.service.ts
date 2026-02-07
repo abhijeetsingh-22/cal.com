@@ -4,7 +4,7 @@ import { OAuthClientUsersService } from "@/modules/oauth-clients/services/oauth-
 import { UsersRepository } from "@/modules/users/users.repository";
 import { Injectable } from "@nestjs/common";
 
-import { PlatformOAuthClient } from "@calcom/prisma/client";
+import type { PlatformOAuthClient } from "@calcom/prisma/client";
 
 @Injectable()
 export class PlatformBookingsService {
@@ -54,6 +54,32 @@ export class PlatformBookingsService {
         platformRescheduleUrl: oAuthClient.bookingRescheduleRedirectUri,
         platformBookingUrl: oAuthClient.bookingRedirectUri,
         arePlatformEmailsEnabled: oAuthClient.areEmailsEnabled,
+        areCalendarEventsEnabled: oAuthClient.areCalendarEventsEnabled,
+      };
+    }
+
+    return undefined;
+  }
+
+  async getOAuthClientParamsForEventType(eventType: {
+    userId: number | null | undefined;
+    teamId: number | null | undefined;
+  }) {
+    let oAuthClient: PlatformOAuthClient | null = null;
+    if (eventType.userId) {
+      oAuthClient = await this.oAuthClientRepository.getByUserId(eventType.userId);
+    } else if (eventType.teamId) {
+      oAuthClient = await this.oAuthClientRepository.getByTeamId(eventType.teamId);
+    }
+
+    if (oAuthClient) {
+      return {
+        platformClientId: oAuthClient.id,
+        platformCancelUrl: oAuthClient.bookingCancelRedirectUri,
+        platformRescheduleUrl: oAuthClient.bookingRescheduleRedirectUri,
+        platformBookingUrl: oAuthClient.bookingRedirectUri,
+        arePlatformEmailsEnabled: oAuthClient.areEmailsEnabled,
+        areCalendarEventsEnabled: oAuthClient.areCalendarEventsEnabled,
       };
     }
 

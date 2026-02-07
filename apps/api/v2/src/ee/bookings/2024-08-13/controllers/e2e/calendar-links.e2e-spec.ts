@@ -1,16 +1,9 @@
-import { bootstrap } from "@/app";
-import { AppModule } from "@/app.module";
-import { CreateScheduleInput_2024_04_15 } from "@/ee/schedules/schedules_2024_04_15/inputs/create-schedule.input";
-import { SchedulesModule_2024_04_15 } from "@/ee/schedules/schedules_2024_04_15/schedules.module";
-import { SchedulesService_2024_04_15 } from "@/ee/schedules/schedules_2024_04_15/services/schedules.service";
-import { PermissionsGuard } from "@/modules/auth/guards/permissions/permissions.guard";
-import { PrismaModule } from "@/modules/prisma/prisma.module";
-import { UsersModule } from "@/modules/users/users.module";
+import { CAL_API_VERSION_HEADER, SUCCESS_STATUS, VERSION_2024_08_13 } from "@calcom/platform-constants";
+import type { Booking, PlatformOAuthClient, Team, User } from "@calcom/prisma/client";
 import { INestApplication } from "@nestjs/common";
 import { NestExpressApplication } from "@nestjs/platform-express";
 import { Test } from "@nestjs/testing";
-import { User } from "@prisma/client";
-import * as request from "supertest";
+import request from "supertest";
 import { BookingsRepositoryFixture } from "test/fixtures/repository/bookings.repository.fixture";
 import { EventTypesRepositoryFixture } from "test/fixtures/repository/event-types.repository.fixture";
 import { OAuthClientRepositoryFixture } from "test/fixtures/repository/oauth-client.repository.fixture";
@@ -18,9 +11,14 @@ import { TeamRepositoryFixture } from "test/fixtures/repository/team.repository.
 import { UserRepositoryFixture } from "test/fixtures/repository/users.repository.fixture";
 import { randomString } from "test/utils/randomString";
 import { withApiAuth } from "test/utils/withApiAuth";
-
-import { CAL_API_VERSION_HEADER, SUCCESS_STATUS, VERSION_2024_08_13 } from "@calcom/platform-constants";
-import { Booking, PlatformOAuthClient, Team } from "@calcom/prisma/client";
+import { AppModule } from "@/app.module";
+import { bootstrap } from "@/bootstrap";
+import { CreateScheduleInput_2024_04_15 } from "@/ee/schedules/schedules_2024_04_15/inputs/create-schedule.input";
+import { SchedulesModule_2024_04_15 } from "@/ee/schedules/schedules_2024_04_15/schedules.module";
+import { SchedulesService_2024_04_15 } from "@/ee/schedules/schedules_2024_04_15/services/schedules.service";
+import { PermissionsGuard } from "@/modules/auth/guards/permissions/permissions.guard";
+import { PrismaModule } from "@/modules/prisma/prisma.module";
+import { UsersModule } from "@/modules/users/users.module";
 
 describe("Bookings Endpoints 2024-08-13", () => {
   describe("Calendar Links", () => {
@@ -122,7 +120,6 @@ describe("Bookings Endpoints 2024-08-13", () => {
         },
       });
 
-
       app = moduleRef.createNestApplication();
       bootstrap(app as NestExpressApplication);
 
@@ -150,11 +147,17 @@ describe("Bookings Endpoints 2024-08-13", () => {
 
       expect(response.body.status).toEqual(SUCCESS_STATUS);
       expect(response.body.data).toBeDefined();
-      
-      const googleCalendarLink = response.body.data.find((item: { id: string }) => item.id === 'googleCalendar').link;
-      const microsoftOfficeLink = response.body.data.find((item: { id: string }) => item.id === 'microsoftOffice').link;
-      const microsoftOutlookLink = response.body.data.find((item: { id: string }) => item.id === 'microsoftOutlook').link;
-      const icsLink = response.body.data.find((item: { id: string }) => item.id === 'ics').link;
+
+      const googleCalendarLink = response.body.data.find(
+        (item: { id: string }) => item.id === "googleCalendar"
+      ).link;
+      const microsoftOfficeLink = response.body.data.find(
+        (item: { id: string }) => item.id === "microsoftOffice"
+      ).link;
+      const microsoftOutlookLink = response.body.data.find(
+        (item: { id: string }) => item.id === "microsoftOutlook"
+      ).link;
+      const icsLink = response.body.data.find((item: { id: string }) => item.id === "ics").link;
 
       expect(googleCalendarLink).toMatch(/^https:\/\/calendar\.google\.com\//);
       expect(microsoftOfficeLink).toMatch(/^https:\/\/outlook\.office\.com\//);

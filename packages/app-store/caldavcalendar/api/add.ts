@@ -5,7 +5,7 @@ import logger from "@calcom/lib/logger";
 import prisma from "@calcom/prisma";
 
 import getInstalledAppPath from "../../_utils/getInstalledAppPath";
-import { CalendarService } from "../lib";
+import { BuildCalendarService } from "../lib";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method === "POST") {
@@ -31,13 +31,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       teamId: null,
       appId: "caldav-calendar",
       invalid: false,
+      delegationCredentialId: null,
     };
 
     try {
-      const dav = new CalendarService({
+      const dav = BuildCalendarService({
         id: 0,
         ...data,
         user: { email: user.email },
+        encryptedKey: null,
       });
       await dav?.listCalendars();
       await prisma.credential.create({

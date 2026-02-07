@@ -1,6 +1,6 @@
-import type { User as PrismaUser, UserPermissionRole } from "@prisma/client";
 import type { DefaultUser } from "next-auth";
 
+import type { User as PrismaUser, UserPermissionRole } from "@calcom/prisma/client";
 import type { MembershipRole } from "@calcom/prisma/enums";
 
 import type { UserProfile } from "./UserProfile";
@@ -13,15 +13,18 @@ declare module "next-auth" {
     hasValidLicense: boolean;
     profileId?: number | null;
     upId: string;
-    user: User;
+    user: User & { uuid: PrismaUser["uuid"] };
   }
 
   interface User extends Omit<DefaultUser, "id"> {
     id: PrismaUser["id"];
+    uuid?: PrismaUser["uuid"];
     emailVerified?: PrismaUser["emailVerified"];
     email_verified?: boolean;
+    completedOnboarding?: boolean;
     impersonatedBy?: {
       id: number;
+      uuid: string;
       role: PrismaUser["role"];
     };
     belongsToActiveTeam?: boolean;
@@ -35,10 +38,12 @@ declare module "next-auth" {
       role: MembershipRole;
     };
     username?: PrismaUser["username"];
+    orgAwareUsername?: PrismaUser["username"];
     avatarUrl?: PrismaUser["avatarUrl"];
     role?: PrismaUser["role"] | "INACTIVE_ADMIN";
     locale?: string | null;
     profile?: UserProfile;
+    samlTenant?: string;
   }
 }
 
@@ -54,6 +59,7 @@ declare module "next-auth/jwt" {
     role?: UserPermissionRole | "INACTIVE_ADMIN" | null;
     impersonatedBy?: {
       id: number;
+      uuid: string;
       role: PrismaUser["role"];
     };
     belongsToActiveTeam?: boolean;
@@ -66,6 +72,7 @@ declare module "next-auth/jwt" {
       domainSuffix: string;
       role: MembershipRole;
     };
+    orgAwareUsername?: PrismaUser["username"];
     organizationId?: number | null;
     locale?: string;
   }

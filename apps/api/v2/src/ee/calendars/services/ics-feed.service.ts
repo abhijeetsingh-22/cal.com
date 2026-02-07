@@ -1,19 +1,23 @@
 import { ICSFeedCalendarApp } from "@/ee/calendars/calendars.interface";
 import { CreateIcsFeedOutputResponseDto } from "@/ee/calendars/input/create-ics.output";
+import { CalendarsCacheService } from "@/ee/calendars/services/calendars-cache.service";
 import { CalendarsService } from "@/ee/calendars/services/calendars.service";
 import { CredentialsRepository } from "@/modules/credentials/credentials.repository";
+import { RedisService } from "@/modules/redis/redis.service";
 import { BadRequestException, UnauthorizedException, Logger } from "@nestjs/common";
 import { Injectable } from "@nestjs/common";
 
 import { SUCCESS_STATUS, ICS_CALENDAR_TYPE, ICS_CALENDAR } from "@calcom/platform-constants";
 import { symmetricEncrypt } from "@calcom/platform-libraries";
-import { IcsFeedCalendarService } from "@calcom/platform-libraries/app-store";
+import { BuildIcsFeedCalendarService } from "@calcom/platform-libraries/app-store";
 
 @Injectable()
 export class IcsFeedService implements ICSFeedCalendarApp {
   constructor(
     private readonly calendarsService: CalendarsService,
-    private readonly credentialRepository: CredentialsRepository
+    private readonly calendarsCacheService: CalendarsCacheService,
+    private readonly credentialRepository: CredentialsRepository,
+    private readonly redisService: RedisService
   ) {}
 
   private logger = new Logger("IcsFeedService");
@@ -35,10 +39,12 @@ export class IcsFeedService implements ICSFeedCalendarApp {
       teamId: null,
       appId: ICS_CALENDAR,
       invalid: false,
+      delegationCredentialId: null,
+      encryptedKey: null,
     };
 
     try {
-      const dav = new IcsFeedCalendarService({
+      const dav = BuildIcsFeedCalendarService({
         id: 0,
         ...data,
         user: { email: userEmail },
@@ -52,11 +58,14 @@ export class IcsFeedService implements ICSFeedCalendarApp {
         );
       }
 
-      const credential = await this.credentialRepository.upsertAppCredential(
+      const credential = await this.credentialRepository.upsertUserAppCredential(
         ICS_CALENDAR_TYPE,
         data.key,
         userId
       );
+
+      await this.calendarsCacheService.deleteConnectedAndDestinationCalendarsCache(userId);
+
       return {
         status: SUCCESS_STATUS,
         data: {
@@ -75,7 +84,10 @@ export class IcsFeedService implements ICSFeedCalendarApp {
   }
 
   async check(userId: number): Promise<{ status: typeof SUCCESS_STATUS }> {
-    const icsFeedCredentials = await this.credentialRepository.getByTypeAndUserId(ICS_CALENDAR_TYPE, userId);
+    const icsFeedCredentials = await this.credentialRepository.findCredentialByTypeAndUserId(
+      ICS_CALENDAR_TYPE,
+      userId
+    );
 
     if (!icsFeedCredentials) {
       throw new BadRequestException("Credentials for Ics Feed calendar not found.");

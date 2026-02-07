@@ -2,7 +2,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 
 import type { CALENDARS } from "@calcom/platform-constants";
 import { SUCCESS_STATUS, ERROR_STATUS } from "@calcom/platform-constants";
-import type { ApiResponse, ApiErrorResponse } from "@calcom/platform-types";
+import type { ApiResponse, ApiErrorResponse, CreateCalendarCredentialsInput } from "@calcom/platform-types";
 
 import http from "../../lib/http";
 
@@ -13,7 +13,13 @@ interface IPUpdateOAuthCredentials {
   onError?: (err: ApiErrorResponse) => void;
 }
 
-export const useGetRedirectUrl = (calendar: (typeof CALENDARS)[number], redir?: string) => {
+export const useGetRedirectUrl = (
+  calendar: (typeof CALENDARS)[number],
+  redir?: string,
+  isDryRun?: boolean
+) => {
+  const redirectUrl = redir ? encodeURIComponent(redir) : "";
+
   const authUrl = useQuery({
     queryKey: getQueryKey(calendar),
     staleTime: Infinity,
@@ -21,7 +27,7 @@ export const useGetRedirectUrl = (calendar: (typeof CALENDARS)[number], redir?: 
     queryFn: () => {
       return http
         ?.get<ApiResponse<{ authUrl: string }>>(
-          `/calendars/${calendar}/connect${redir ? `?redir=${redir}` : ""}`
+          `/calendars/${calendar}/connect?redir=${redirectUrl}&isDryRun=${isDryRun ?? ""}`
         )
         .then(({ data: responseBody }) => {
           if (responseBody.status === SUCCESS_STATUS) {
@@ -36,14 +42,22 @@ export const useGetRedirectUrl = (calendar: (typeof CALENDARS)[number], redir?: 
   return authUrl;
 };
 
-export const useConnect = (calendar: (typeof CALENDARS)[number], redir?: string) => {
-  const { refetch } = useGetRedirectUrl(calendar, redir);
+export const useConnect = (calendar: (typeof CALENDARS)[number], redir?: string, isDryRun?: boolean) => {
+  const { refetch } = useGetRedirectUrl(calendar, redir, isDryRun);
 
   const connect = async () => {
     const redirectUri = await refetch();
 
     if (redirectUri.data) {
-      window.location.href = redirectUri.data;
+      let targetWindow;
+      if (window !== window.top && window.top) {
+        // if its an iframe, the target window should be the parent window
+        targetWindow = window.top;
+      } else {
+        targetWindow = window;
+      }
+
+      targetWindow.location.href = redirectUri.data;
     }
   };
 
@@ -63,11 +77,11 @@ export const useSaveCalendarCredentials = (
   const mutation = useMutation<
     ApiResponse<{ status: string }>,
     unknown,
-    { username: string; password: string; calendar: (typeof CALENDARS)[number] }
+    CreateCalendarCredentialsInput & { calendar: (typeof CALENDARS)[number] }
   >({
     mutationFn: (data) => {
       const { calendar, username, password } = data;
-      const body = {
+      const body: CreateCalendarCredentialsInput = {
         username,
         password,
       };

@@ -1,50 +1,92 @@
-import { describe, expect, it, beforeAll, vi } from "vitest";
+import { describe, it, expect } from "vitest";
+import z from "zod";
 
-import dayjs from "@calcom/dayjs";
-import { stringToDayjs } from "@calcom/prisma/zod-utils";
+import { excludeOrRequireEmailSchema } from "./zod-utils";
 
-beforeAll(() => {
-  vi.setSystemTime(dayjs.utc("2021-06-20T11:59:59Z").toDate());
-});
+describe("excludeOrRequireEmailSchema", () => {
+  const parse = (input: string) => z.object({ v: excludeOrRequireEmailSchema }).safeParse({ v: input });
 
-describe("Tests the parsing logic", () => {
-  it("when supplied with no timezone data", async () => {
-    const date = stringToDayjs("2024-02-27T17:00:00");
-    expect(date.toISOString()).toBe("2024-02-27T17:00:00.000Z");
+  describe("valid inputs", () => {
+    it("accepts single TLD domains", () => {
+      expect(parse("gmail.com").success).toBe(true);
+    });
+
+    it("accepts uppercase domains", () => {
+      expect(parse("GMAIL.COM").success).toBe(true);
+    });
+
+    it("accepts multi-level TLD domains (co.uk)", () => {
+      expect(parse("hotmail.co.uk").success).toBe(true);
+    });
+
+    it("accepts multi-level TLD domains (k12.us)", () => {
+      expect(parse("mail.school.k12.us").success).toBe(true);
+    });
+
+    it("accepts full email addresses", () => {
+      expect(parse("user@example.co.uk").success).toBe(true);
+    });
+
+    it("accepts @domain format", () => {
+      expect(parse("@example.co.uk").success).toBe(true);
+    });
+
+    it("accepts multiple comma-separated entries", () => {
+      expect(parse("gmail.com, @example.com, user@example.co.uk").success).toBe(true);
+    });
+
+    it("accepts domains with trailing comma (ignores empty entry)", () => {
+      expect(parse("gmail.com, hotmail.co.uk,").success).toBe(true);
+    });
+
+    it("accepts domains with extra spaces", () => {
+      expect(parse("  gmail.com  ,  hotmail.co.uk  ").success).toBe(true);
+    });
+
+    it("accepts domains with numbers and hyphens", () => {
+      expect(parse("example123.com").success).toBe(true);
+      expect(parse("my-domain.com").success).toBe(true);
+    });
+
+    it("accepts very short domains (min 2-char TLD)", () => {
+      expect(parse("a.co").success).toBe(true);
+    });
+
+    it("accepts long multi-level domains", () => {
+      expect(parse("example.co.uk.test.com").success).toBe(true);
+    });
+
+    it("accepts single-label domains and missing dots", () => {
+      expect(parse("example").success).toBe(true);
+      expect(parse("@example").success).toBe(true);
+    });
   });
 
-  it("when supplied with UTC", async () => {
-    const date = stringToDayjs("2024-02-27T17:00:00Z");
-    expect(date.year()).toBe(2024);
-    expect(date.month()).toBe(1);
-    expect(date.date()).toBe(27);
-    expect(date.hour()).toBe(17);
-    expect(date.minute()).toBe(0);
-    expect(date.second()).toBe(0);
-    expect(date.utcOffset()).toBe(0);
-  });
+  describe("invalid inputs", () => {
 
-  it("when supplied with UTC- timezone", async () => {
-    const date = stringToDayjs("2024-02-27T17:00:00-05:00");
-    expect(date.year()).toBe(2024);
-    expect(date.month()).toBe(1);
-    expect(date.date()).toBe(27);
-    expect(date.hour()).toBe(17);
-    expect(date.minute()).toBe(0);
-    expect(date.second()).toBe(0);
-    expect(date.utcOffset()).toBe(-300);
-    expect(date.toISOString()).toBe("2024-02-27T22:00:00.000Z");
-  });
+    it("rejects invalid TLD lengths", () => {
+      expect(parse("example.c").success).toBe(false);
+    });
 
-  it("when supplied with UTC+ timezone", async () => {
-    const date = stringToDayjs("2024-02-27T17:00:00+05:00");
-    expect(date.year()).toBe(2024);
-    expect(date.month()).toBe(1);
-    expect(date.date()).toBe(27);
-    expect(date.hour()).toBe(17);
-    expect(date.minute()).toBe(0);
-    expect(date.second()).toBe(0);
-    expect(date.utcOffset()).toBe(300);
-    expect(date.toISOString()).toBe("2024-02-27T12:00:00.000Z");
+    it("rejects leading/trailing hyphens in labels", () => {
+      expect(parse("-bad.com").success).toBe(false);
+      expect(parse("bad-.com").success).toBe(false);
+    });
+
+    it("rejects leading/trailing dots and consecutive dots", () => {
+      expect(parse(".bad.com").success).toBe(false);
+      expect(parse("bad.com.").success).toBe(false);
+      expect(parse("ex..ample.com").success).toBe(false);
+    });
+
+    it("allows empty input but rejects commas-only", () => {
+      expect(parse("").success).toBe(true);
+      expect(parse("   ").success).toBe(true);
+      expect(parse(",,,").success).toBe(false);
+    });
+
+    it("rejects Unicode domains (ASCII-only)", () => {
+      expect(parse("münchen.de").success).toBe(false);
+    });
   });
 });

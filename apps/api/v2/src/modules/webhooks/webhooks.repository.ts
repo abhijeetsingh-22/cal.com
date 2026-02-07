@@ -2,7 +2,7 @@ import { PrismaReadService } from "@/modules/prisma/prisma-read.service";
 import { Injectable } from "@nestjs/common";
 import { v4 as uuidv4 } from "uuid";
 
-import { Webhook } from "@calcom/prisma/client";
+import type { Webhook } from "@calcom/prisma/client";
 
 import { PrismaWriteService } from "../prisma/prisma-write.service";
 
@@ -47,6 +47,14 @@ export class WebhooksRepository {
     return this.dbRead.prisma.webhook.findFirst({
       where: { id: webhookId },
     });
+  }
+
+  async getWebhookSubscriberUrl(webhookId: string): Promise<string | undefined> {
+    const webhook = await this.dbRead.prisma.webhook.findFirst({
+      where: { id: webhookId },
+      select: { subscriberUrl: true },
+    });
+    return webhook?.subscriberUrl ?? undefined;
   }
 
   async getUserWebhooksPaginated(userId: number, skip: number, take: number) {

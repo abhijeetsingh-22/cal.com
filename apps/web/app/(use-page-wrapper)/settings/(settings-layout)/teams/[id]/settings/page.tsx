@@ -1,12 +1,15 @@
 import { _generateMetadata, getTranslate } from "app/_utils";
 
-import TeamSettingsView from "@calcom/features/ee/teams/pages/team-settings-view";
 import SettingsHeader from "@calcom/features/settings/appDir/SettingsHeader";
+import TeamSettingsView from "@calcom/web/modules/ee/teams/views/team-settings-view";
 
-export const generateMetadata = async () =>
+export const generateMetadata = async ({ params }: { params: Promise<{ id: string }> }) =>
   await _generateMetadata(
     (t) => t("settings"),
-    (t) => t("team_settings_description")
+    (t) => t("team_settings_description"),
+    undefined,
+    undefined,
+    `/settings/teams/${(await params).id}/settings`
   );
 
 const Page = async () => {

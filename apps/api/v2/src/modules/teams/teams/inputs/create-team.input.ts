@@ -1,7 +1,9 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
-import { IsBoolean, IsObject, IsOptional, IsString, IsUrl, Length } from "class-validator";
+import { IsBoolean, IsObject, IsOptional, IsString, Length, Validate } from "class-validator";
 
 import { Metadata, METADATA_DOCS, ValidateMetadata } from "@calcom/platform-types";
+
+import { SSRFSafeUrlValidator } from "../validators/ssrfSafeUrlValidator";
 
 export class CreateTeamInput {
   @IsString()
@@ -11,11 +13,16 @@ export class CreateTeamInput {
 
   @IsOptional()
   @IsString()
-  @ApiPropertyOptional({ type: String, description: "Team slug", example: "caltel" })
+  @ApiPropertyOptional({
+    type: String,
+    description: "Team slug in kebab-case - if not provided will be generated automatically based on name.",
+    example: "caltel",
+  })
   readonly slug?: string;
 
   @IsOptional()
-  @IsUrl()
+  @IsString()
+  @Validate(SSRFSafeUrlValidator)
   @ApiPropertyOptional({
     type: String,
     example: "https://i.cal.com/api/avatar/b0b58752-68ad-4c0d-8024-4fa382a77752.png",
@@ -24,17 +31,20 @@ export class CreateTeamInput {
   readonly logoUrl?: string;
 
   @IsOptional()
-  @IsUrl()
+  @IsString()
+  @Validate(SSRFSafeUrlValidator)
   @ApiPropertyOptional()
   readonly calVideoLogo?: string;
 
   @IsOptional()
-  @IsUrl()
+  @IsString()
+  @Validate(SSRFSafeUrlValidator)
   @ApiPropertyOptional()
   readonly appLogo?: string;
 
   @IsOptional()
-  @IsUrl()
+  @IsString()
+  @Validate(SSRFSafeUrlValidator)
   @ApiPropertyOptional()
   readonly appIconLogo?: string;
 
@@ -84,7 +94,8 @@ export class CreateTeamInput {
   readonly darkBrandColor?: string;
 
   @IsOptional()
-  @IsUrl()
+  @IsString()
+  @Validate(SSRFSafeUrlValidator)
   @ApiPropertyOptional({
     type: String,
     example: "https://i.cal.com/api/avatar/949be534-7a88-4185-967c-c020b0c0bef3.png",
@@ -120,6 +131,11 @@ export class CreateTeamInput {
 
   @IsOptional()
   @IsBoolean()
-  @ApiPropertyOptional({ type: Boolean, default: true })
+  @ApiPropertyOptional({
+    type: Boolean,
+    default: true,
+    description:
+      "If you are a platform customer, don't pass 'false', because then team creator won't be able to create team event types.",
+  })
   readonly autoAcceptCreator?: boolean = true;
 }

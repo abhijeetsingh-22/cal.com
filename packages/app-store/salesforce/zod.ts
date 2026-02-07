@@ -3,8 +3,8 @@ import { z } from "zod";
 import { eventTypeAppCardZod } from "../eventTypeAppCardZod";
 import { SalesforceRecordEnum, WhenToWriteToRecord, SalesforceFieldType } from "./lib/enums";
 
-const writeToBookingEntry = z.object({
-  value: z.string(),
+export const writeToBookingEntry = z.object({
+  value: z.union([z.string(), z.boolean()]),
   fieldType: z.nativeEnum(SalesforceFieldType),
   whenToWrite: z.nativeEnum(WhenToWriteToRecord),
 });
@@ -12,11 +12,24 @@ const writeToBookingEntry = z.object({
 export const writeToRecordEntrySchema = z.object({
   field: z.string(),
   fieldType: z.nativeEnum(SalesforceFieldType),
-  value: z.string(),
+  value: z.union([z.string(), z.boolean()]),
   whenToWrite: z.nativeEnum(WhenToWriteToRecord),
 });
 
 export const writeToRecordDataSchema = z.record(z.string(), writeToBookingEntry);
+
+export const RRSkipFieldRuleActionEnum = {
+  IGNORE: "ignore",
+  MUST_INCLUDE: "must_include",
+} as const;
+
+export const rrSkipFieldRuleSchema = z.object({
+  field: z.string(),
+  value: z.string(),
+  action: z.enum([RRSkipFieldRuleActionEnum.IGNORE, RRSkipFieldRuleActionEnum.MUST_INCLUDE]),
+});
+
+export type RRSkipFieldRule = z.infer<typeof rrSkipFieldRuleSchema>;
 
 export const routingFormOptions = z
   .object({
@@ -40,7 +53,9 @@ export const appDataSchema = eventTypeAppCardZod.extend({
     .nativeEnum(SalesforceRecordEnum)
     .default(SalesforceRecordEnum.CONTACT)
     .optional(),
+  rrSkipFieldRules: z.array(rrSkipFieldRuleSchema).optional(),
   ifFreeEmailDomainSkipOwnerCheck: z.boolean().optional(),
+  roundRobinSkipFallbackToLeadOwner: z.boolean().optional(),
   skipContactCreation: z.boolean().optional(),
   createEventOn: z.nativeEnum(SalesforceRecordEnum).default(SalesforceRecordEnum.CONTACT).optional(),
   createNewContactUnderAccount: z.boolean().optional(),
@@ -55,6 +70,8 @@ export const appDataSchema = eventTypeAppCardZod.extend({
   onBookingWriteToRecord: z.boolean().optional(),
   onBookingWriteToRecordFields: z.record(z.string(), writeToBookingEntry).optional(),
   ignoreGuests: z.boolean().optional(),
+  onCancelWriteToEventRecord: z.boolean().optional(),
+  onCancelWriteToEventRecordFields: z.record(z.string(), writeToBookingEntry).optional(),
 });
 
 export const appKeysSchema = z.object({

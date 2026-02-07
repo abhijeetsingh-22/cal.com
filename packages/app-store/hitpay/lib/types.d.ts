@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { Prisma } from "@calcom/prisma/client";
 
 export type PaidBooking = Prisma.BookingGetPayload<{
   select: {
@@ -6,6 +6,7 @@ export type PaidBooking = Prisma.BookingGetPayload<{
     title: true;
     startTime: true;
     endTime: true;
+    eventTypeId: true;
     eventType: {
       select: {
         slug: true;

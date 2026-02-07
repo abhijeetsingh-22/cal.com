@@ -1,9 +1,12 @@
-import type { Webhook } from "@prisma/client";
-import type { Prisma } from "@prisma/client";
 import { v4 } from "uuid";
 
+import { PermissionCheckService } from "@calcom/features/pbac/services/permission-check.service";
 import { updateTriggerForExistingBookings } from "@calcom/features/webhooks/lib/scheduleTrigger";
+import { validateUrlForSSRFSync } from "@calcom/lib/ssrfProtection";
 import { prisma } from "@calcom/prisma";
+import type { Webhook } from "@calcom/prisma/client";
+import type { Prisma } from "@calcom/prisma/client";
+import { MembershipRole } from "@calcom/prisma/enums";
 import { EventTypeMetaDataSchema } from "@calcom/prisma/zod-utils";
 import type { TrpcSessionUser } from "@calcom/trpc/server/types";
 
@@ -21,12 +24,38 @@ type CreateOptions = {
 export const createHandler = async ({ ctx, input }: CreateOptions) => {
   const { user } = ctx;
 
+  // SSRF validation for webhook URL
+  const validation = validateUrlForSSRFSync(input.subscriberUrl);
+  if (!validation.isValid) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: `Webhook URL is not allowed: ${validation.error}`,
+    });
+  }
+
   const webhookData: Prisma.WebhookCreateInput = {
     id: v4(),
     ...input,
   };
   if (input.platform && user.role !== "ADMIN") {
     throw new TRPCError({ code: "UNAUTHORIZED" });
+  }
+
+  if (input.teamId) {
+    const permissionService = new PermissionCheckService();
+
+    const hasPermission = await permissionService.checkPermission({
+      userId: user.id,
+      teamId: input.teamId,
+      permission: "webhook.create",
+      fallbackRoles: [MembershipRole.ADMIN, MembershipRole.OWNER],
+    });
+
+    if (!hasPermission) {
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+      });
+    }
   }
 
   // Add userId if platform, eventTypeId, and teamId are not provided

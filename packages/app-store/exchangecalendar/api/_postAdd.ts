@@ -10,7 +10,7 @@ import prisma from "@calcom/prisma";
 
 import checkSession from "../../_utils/auth";
 import { ExchangeAuthentication, ExchangeVersion } from "../enums";
-import { CalendarService } from "../lib";
+import { BuildCalendarService } from "../lib";
 
 const formSchema = z
   .object({
@@ -34,10 +34,11 @@ export async function getHandler(req: NextApiRequest, res: NextApiResponse) {
     teamId: null,
     appId: "exchange",
     invalid: false,
+    delegationCredentialId: null,
   };
 
   try {
-    const service = new CalendarService({ id: 0, user: { email: session.user.email || "" }, ...data });
+    const service = BuildCalendarService({ id: 0, user: { email: session.user.email || "" }, ...data, encryptedKey: null });
     await service?.listCalendars();
     await prisma.credential.create({ data });
   } catch (reason) {

@@ -1,15 +1,15 @@
-// eslint-disable-next-line no-restricted-imports
-import { cloneDeep } from "lodash";
 import type { TFunction } from "i18next";
+import { default as cloneDeep } from "lodash/cloneDeep";
 
 import { getRichDescription } from "@calcom/lib/CalEventParser";
 import { EMAIL_FROM_NAME } from "@calcom/lib/constants";
+import { getReplyToHeader } from "@calcom/lib/getReplyToHeader";
 import { TimeFormat } from "@calcom/lib/timeFormat";
 import type { CalendarEvent, Person } from "@calcom/types/Calendar";
 
-import { renderEmail } from "../";
 import generateIcsFile from "../lib/generateIcsFile";
 import { GenerateIcsRole } from "../lib/generateIcsFile";
+import renderEmail from "../src/renderEmail";
 import BaseEmail from "./_base-email";
 
 export type Reassigned = { name: string | null; email: string; reason?: string; byUser?: string };
@@ -50,7 +50,11 @@ export default class OrganizerScheduledEmail extends BaseEmail {
       }),
       from: `${EMAIL_FROM_NAME} <${this.getMailerOptions().from}>`,
       to: toAddresses.join(","),
-      replyTo: [...this.calEvent.attendees.map(({ email }) => email)],
+      ...getReplyToHeader(
+        this.calEvent,
+        this.calEvent.attendees.map(({ email }) => email),
+        true
+      ),
       subject: `${this.newSeat ? `${this.t("new_attendee")}: ` : ""}${this.calEvent.title}`,
       html: await this.getHtml(
         clonedCalEvent,

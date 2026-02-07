@@ -1,13 +1,15 @@
-import { stringify } from "querystring";
+import { stringify } from "node:querystring";
 
 import dayjs from "@calcom/dayjs";
-import { getLocation, getRichDescription } from "@calcom/lib/CalEventParser";
+import { getLocation } from "@calcom/lib/CalEventParser";
 import logger from "@calcom/lib/logger";
 import prisma from "@calcom/prisma";
 import type {
   Calendar,
+  CalendarServiceEvent,
   CalendarEvent,
   EventBusyDate,
+  GetAvailabilityParams,
   IntegrationCalendar,
   NewCalendarEventType,
 } from "@calcom/types/Calendar";
@@ -17,7 +19,7 @@ import getAppKeysFromSlug from "../../_utils/getAppKeysFromSlug";
 import type { ZohoAuthCredentials, FreeBusy, ZohoCalendarListResp } from "../types/ZohoCalendar";
 import { appKeysSchema as zohoKeysSchema } from "../zod";
 
-export default class ZohoCalendarService implements Calendar {
+class ZohoCalendarService implements Calendar {
   private integrationName = "";
   private log: typeof logger;
   auth: { getToken: () => Promise<ZohoAuthCredentials> };
@@ -112,7 +114,7 @@ export default class ZohoCalendarService implements Calendar {
     return this.handleData(response, this.log);
   };
 
-  async createEvent(event: CalendarEvent): Promise<NewCalendarEventType> {
+  async createEvent(event: CalendarServiceEvent): Promise<NewCalendarEventType> {
     let eventId = "";
     let eventRespData;
     const [mainHostDestinationCalendar] = event.destinationCalendar ?? [];
@@ -158,7 +160,7 @@ export default class ZohoCalendarService implements Calendar {
    * @param event
    * @returns
    */
-  async updateEvent(uid: string, event: CalendarEvent, externalCalendarId?: string) {
+  async updateEvent(uid: string, event: CalendarServiceEvent, externalCalendarId?: string) {
     const eventId = uid;
     let eventRespData;
     const [mainHostDestinationCalendar] = event.destinationCalendar ?? [];
@@ -301,11 +303,8 @@ export default class ZohoCalendarService implements Calendar {
     }
   }
 
-  async getAvailability(
-    dateFrom: string,
-    dateTo: string,
-    selectedCalendars: IntegrationCalendar[]
-  ): Promise<EventBusyDate[]> {
+  async getAvailability(params: GetAvailabilityParams): Promise<EventBusyDate[]> {
+    const { dateFrom, dateTo, selectedCalendars } = params;
     const selectedCalendarIds = selectedCalendars
       .filter((e) => e.integration === this.integrationName)
       .map((e) => e.externalId);
@@ -457,26 +456,42 @@ export default class ZohoCalendarService implements Calendar {
     return data;
   }
 
-  private translateEvent = (event: CalendarEvent) => {
+  private translateEvent = (event: CalendarServiceEvent) => {
     const zohoEvent = {
       title: event.title,
-      description: getRichDescription(event),
+      description: event.calendarDescription,
       dateandtime: {
         start: dayjs(event.startTime).format("YYYYMMDDTHHmmssZZ"),
         end: dayjs(event.endTime).format("YYYYMMDDTHHmmssZZ"),
         timezone: event.organizer.timeZone,
       },
       attendees: event.attendees.map((attendee) => ({ email: attendee.email })),
-      isprivate: event.seatsShowAttendees,
+      isprivate: event.hideCalendarEventDetails ?? false,
       reminders: [
         {
           minutes: "-15",
-          action: "popup",
-        },
-      ],
-      location: event.location ? getLocation(event) : undefined,
+            action: "popup",
+          },
+        ],
+      location: event.location
+        ? getLocation({
+            videoCallData: event.videoCallData,
+            additionalInformation: event.additionalInformation,
+            location: event.location,
+            uid: event.uid,
+          })
+        : undefined,
     };
 
     return zohoEvent;
   };
+}
+
+/**
+ * Factory function that creates a Zoho Calendar service instance.
+ * This is exported instead of the class to prevent internal types
+ * from leaking into the emitted .d.ts file.
+ */
+export default function BuildCalendarService(credential: CredentialPayload): Calendar {
+  return new ZohoCalendarService(credential);
 }

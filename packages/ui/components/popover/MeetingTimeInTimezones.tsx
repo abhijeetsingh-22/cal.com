@@ -6,7 +6,7 @@ import {
   isPreviousDayInTimezone,
   isSupportedTimeZone,
   sortByTimezone,
-} from "@calcom/lib/date-fns";
+} from "@calcom/lib/dayjs";
 
 import { Icon } from "../icon";
 
@@ -80,7 +80,7 @@ const MeetingTimeInTimezones = ({
               <span className="inline-flex align-baseline">
                 {time.startTime} - {time.endTime}
                 {(time.isNextDay || time.isPreviousDay) && (
-                  <span className="text-medium bg-muted text-emphasis ml-2 inline-flex h-5 w-5 items-center justify-center rounded-full text-[10px]">
+                  <span className="text-medium bg-cal-muted text-emphasis ml-2 inline-flex h-5 w-5 items-center justify-center rounded-full text-[10px]">
                     {time.isNextDay ? "+1" : "-1"}
                   </span>
                 )}

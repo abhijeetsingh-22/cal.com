@@ -97,7 +97,7 @@ describe("Navigation Components", () => {
         href: "https://external.com",
         isExternalLink: true,
         icon: "external",
-        "data-testid": "Exteral",
+        "data-testid": "External",
       },
       {
         name: "Disabled",
@@ -158,8 +158,9 @@ describe("Navigation Components", () => {
         }
       });
 
-      // Check sticky behavior
+      // Check sticky behavior with default offset
       await expect(container.firstChild).toHaveClass("sticky");
+      await expect(container.firstChild).toHaveStyle("top: 24px");
     });
 
     test("applies custom icon correctly", async () => {

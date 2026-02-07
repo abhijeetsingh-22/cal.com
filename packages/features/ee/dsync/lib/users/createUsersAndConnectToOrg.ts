@@ -1,7 +1,9 @@
-import { createOrUpdateMemberships } from "@calcom/features/auth/signup/utils/createOrUpdateMemberships";
+import { MembershipRepository } from "@calcom/features/membership/repositories/MembershipRepository";
+import { SeatChangeTrackingService } from "@calcom/features/ee/billing/service/seatTracking/SeatChangeTrackingService";
+import { ProfileRepository } from "@calcom/features/profile/repositories/ProfileRepository";
 import prisma from "@calcom/prisma";
 import type { IdentityProvider } from "@calcom/prisma/enums";
-import { CreationSource } from "@calcom/prisma/enums";
+import { CreationSource, MembershipRole } from "@calcom/prisma/enums";
 
 import {
   deriveNameFromOrgUsername,
@@ -48,6 +50,7 @@ export const createUsersAndConnectToOrg = async ({
         creationSource: CreationSource.WEBAPP,
       };
     }),
+    skipDuplicates: true,
   });
 
   const users = await prisma.user.findMany({
@@ -58,17 +61,32 @@ export const createUsersAndConnectToOrg = async ({
     },
     select: dSyncUserSelect,
   });
-  // Assign created users to organization
-  for (const user of users) {
-    await createOrUpdateMemberships({
-      user,
-      team: {
-        id: org.id,
-        isOrganization: true,
-        parentId: null, // orgs don't have a parentId
-      },
+
+  // Create profiles for new users
+  await ProfileRepository.createManyPromise({
+    users,
+    organizationId: org.id,
+    orgAutoAcceptEmail: org.organizationSettings?.orgAutoAcceptEmail ?? "",
+  });
+
+  // Create memberships for new members
+  const membershipResult = await MembershipRepository.createMany(
+    users.map((user) => ({
+      userId: user.id,
+      teamId: org.id,
+      role: MembershipRole.MEMBER,
+      accepted: true,
+    }))
+  );
+
+  if (membershipResult.count > 0) {
+    const seatTracker = new SeatChangeTrackingService();
+    await seatTracker.logSeatAddition({
+      teamId: org.id,
+      seatCount: membershipResult.count,
     });
   }
+
   return users;
 };
 

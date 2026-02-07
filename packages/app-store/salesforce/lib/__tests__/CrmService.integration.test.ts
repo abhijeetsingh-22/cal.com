@@ -6,14 +6,27 @@
  *
  * CrmService.test.ts could still focus on testing detailed edge cases as needed.
  */
-import "../../../../../tests/libs/__mocks__/prisma";
-
 import jsforce from "@jsforce/jsforce-node";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-import SalesforceCRMService from "../CrmService";
+import { createSalesforceCrmServiceWithSalesforceType } from "../CrmService";
 import { SalesforceRecordEnum } from "../enums";
+import {
+  mockValueOfAccountOwnershipQueryMatchingContact,
+  mockValueOfAccountOwnershipQueryMatchingAccountWebsite,
+  mockValueOfAccountOwnershipQueryMatchingRelatedContacts,
+} from "../graphql/__tests__/urqlMock";
 import { createSalesforceMock } from "./salesforceMock";
+
+const mockUrqlQuery = vi.fn();
+
+vi.mock("@urql/core", () => ({
+  Client: class {
+    query = mockUrqlQuery;
+  },
+  cacheExchange: vi.fn(),
+  fetchExchange: vi.fn(),
+}));
 
 vi.mock("@calcom/lib/constants", () => {
   return {
@@ -26,12 +39,12 @@ vi.mock("@calcom/lib/constants", () => {
 vi.mock("@jsforce/jsforce-node", () => {
   return {
     default: {
-      Connection: vi.fn().mockImplementation(() => ({})),
+      Connection: vi.fn().mockImplementation(function() { return {}; }),
     },
   };
 });
 
-vi.mock("@calcom/lib/freeEmailDomainCheck/checkIfFreeEmailDomain", () => ({
+vi.mock("@calcom/features/watchlist/lib/freeEmailDomainCheck/checkIfFreeEmailDomain", () => ({
   checkIfFreeEmailDomain: vi.fn().mockResolvedValue(false),
 }));
 
@@ -42,14 +55,27 @@ vi.mock("../getSalesforceAppKeys", () => ({
   }),
 }));
 
+vi.mock("../getSalesforceTokenLifetime", () => ({
+  getSalesforceTokenLifetime: vi.fn().mockResolvedValue(7200),
+}));
+
+vi.mock("@calcom/features/credentials/repositories/CredentialRepository", () => ({
+  CredentialRepository: {
+    updateWhereId: vi.fn().mockResolvedValue({}),
+  },
+}));
+
 // Helper to create mock credential
-const createMockCredential = () => {
+const createMockCredential = (options?: { tokenLifetime?: number; issuedAt?: string }) => {
+  const now = Date.now();
   return {
     id: 1,
     key: {
       access_token: "test_access_token",
       refresh_token: "test_refresh_token",
       instance_url: "https://test.salesforce.com",
+      issued_at: options?.issuedAt ?? String(now),
+      token_lifetime: options?.tokenLifetime ?? 7200,
     },
     type: "salesforce_other_calendar",
     user: {
@@ -59,6 +85,8 @@ const createMockCredential = () => {
     teamId: 1,
     appId: "test_app_id",
     invalid: false,
+    delegationCredentialId: null,
+    encryptedKey: null,
   };
 };
 
@@ -102,13 +130,15 @@ describe("SalesforceCRMService", () => {
     // Override jsforce mock with our custom mock
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
     // @ts-ignore - Not full implementation of jsforce.Connection
-    vi.mocked(jsforce.Connection).mockImplementation(() => ({
-      ...salesforceMock.mockConnection,
-      version: "1.0",
-      loginUrl: "https://test.salesforce.com",
-      instanceUrl: "https://test.salesforce.com",
-      accessToken: "123",
-    }));
+    vi.mocked(jsforce.Connection).mockImplementation(function() {
+      return {
+        ...salesforceMock.mockConnection,
+        version: "1.0",
+        loginUrl: "https://test.salesforce.com",
+        instanceUrl: "https://test.salesforce.com",
+        accessToken: "123",
+      };
+    });
   });
 
   describe("createOnLeadAndSearchOnAccount", () => {
@@ -116,28 +146,10 @@ describe("SalesforceCRMService", () => {
     describe("getContacts: forRoundRobinSkip=true", () => {
       const forRoundRobinSkip = true;
       it("(Lookup-1) should return contact's account owner's email as ownerEmail if the contact is found directly by email", async () => {
-        const crmService = new SalesforceCRMService(credential, appOptions);
-        const contactAccountOwnerEmail = "contact-account-owner@acme.com";
-        const contactOwnerEmail = "contact-owner@acme.com";
-        const lookingForEmail = "test@example.com";
-
-        const account = salesforceMock.addAccount({
-          Id: "test-account-id",
-          Owner: {
-            Email: contactAccountOwnerEmail,
-          },
-          Website: "https://anything",
-        });
-
-        salesforceMock.addContact({
-          Email: lookingForEmail,
-          FirstName: "Test",
-          LastName: "User",
-          AccountId: account.Id,
-          Owner: {
-            Email: contactOwnerEmail,
-          },
-        });
+        mockUrqlQuery.mockResolvedValue(mockValueOfAccountOwnershipQueryMatchingContact());
+        const crmService = createSalesforceCrmServiceWithSalesforceType(credential, appOptions);
+        const contactAccountOwnerEmail = "owner@test.com";
+        const lookingForEmail = "contact@email.com";
 
         const contacts = await crmService.getContacts({
           emails: lookingForEmail,
@@ -148,21 +160,15 @@ describe("SalesforceCRMService", () => {
         expect(contacts[0].ownerEmail).toBe(contactAccountOwnerEmail);
         expect(contacts[0].email).toBe(lookingForEmail);
         expect(contacts[0].recordType).toBe(SalesforceRecordEnum.ACCOUNT);
-        expect(contacts[0].id).toBe(account.Id);
+        expect(contacts[0].id).toBe("accountId");
       });
 
       it("(Lookup-2) should fallback to account(and use the account owner email as ownerEmail) matched by emailDomain if the contact is not found(i.e Lookup-1 fails)", async () => {
-        const crmService = new SalesforceCRMService(credential, appOptions);
-        const contactAccountOwnerEmail = "contact-account-owner@example.com";
+        mockUrqlQuery.mockResolvedValue(mockValueOfAccountOwnershipQueryMatchingAccountWebsite());
+        const crmService = createSalesforceCrmServiceWithSalesforceType(credential, appOptions);
+        const contactAccountOwnerEmail = "owner@test.com";
         const emailDomain = "example.com";
         const lookingForEmail = `test@${emailDomain}`;
-        const account = salesforceMock.addAccount({
-          Id: "test-account-id",
-          Owner: {
-            Email: contactAccountOwnerEmail,
-          },
-          Website: `https://${emailDomain}`,
-        });
 
         const contacts = await crmService.getContacts({
           emails: lookingForEmail,
@@ -179,47 +185,11 @@ describe("SalesforceCRMService", () => {
       });
 
       it("(Lookup-3) should fallback to account having most number of contacts matched by emailDomain when Lookup-1 and Lookup-2 fails", async () => {
-        const crmService = new SalesforceCRMService(credential, appOptions);
-        const account1OwnerEmail = "account1-owner@example.com";
-        const account2OwnerEmail = "account2-owner@example.com";
+        mockUrqlQuery.mockResolvedValue(mockValueOfAccountOwnershipQueryMatchingRelatedContacts());
+        const crmService = createSalesforceCrmServiceWithSalesforceType(credential, appOptions);
+        const accountOwnerEmail = "owner1@test.com";
         const emailDomain = "example.com";
         const lookingForEmail = `test@${emailDomain}`;
-        const account1 = salesforceMock.addAccount({
-          Id: "test-account-id1",
-          Owner: {
-            Email: account1OwnerEmail,
-          },
-          Website: `https://anything`,
-        });
-
-        const dominatingAccount = salesforceMock.addAccount({
-          Id: "test-account-id2",
-          Owner: {
-            Email: account2OwnerEmail,
-          },
-          Website: `https://anything`,
-        });
-
-        salesforceMock.addContact({
-          Email: `some-other-contact_acc2_1@${emailDomain}`,
-          FirstName: "Test",
-          LastName: "User",
-          AccountId: dominatingAccount.Id,
-        });
-
-        salesforceMock.addContact({
-          Email: `some-other-contact_acc2_2@${emailDomain}`,
-          FirstName: "Test",
-          LastName: "User",
-          AccountId: dominatingAccount.Id,
-        });
-
-        salesforceMock.addContact({
-          Email: `some-other-contact_acc1_1@${emailDomain}`,
-          FirstName: "Test",
-          LastName: "User",
-          AccountId: account1.Id,
-        });
 
         const contacts = await crmService.getContacts({
           emails: lookingForEmail,
@@ -227,7 +197,7 @@ describe("SalesforceCRMService", () => {
         });
 
         expect(contacts).toHaveLength(1);
-        expect(contacts[0].ownerEmail).toBe(account2OwnerEmail);
+        expect(contacts[0].ownerEmail).toBe(accountOwnerEmail);
         // Account doesn't have email
         expect(contacts[0].email).toBe("");
         expect(contacts[0].recordType).toBe(SalesforceRecordEnum.ACCOUNT);
@@ -239,7 +209,7 @@ describe("SalesforceCRMService", () => {
     describe("getContacts: forRoundRobinSkip=false i.e. how it is called when creating event", () => {
       const forRoundRobinSkip = false;
       it("should return lead object if the lead is found directly by email and contact is not found by that email", async () => {
-        const crmService = new SalesforceCRMService(credential, appOptions);
+        const crmService = createSalesforceCrmServiceWithSalesforceType(credential, appOptions);
         const contactAccountOwnerEmail = "contact-account-owner@acme.com";
         const contactOwnerEmail = "contact-owner@acme.com";
         const leadOwnerEmail = "lead-owner@acme.com";
@@ -254,7 +224,7 @@ describe("SalesforceCRMService", () => {
           Website: "https://anything",
         });
 
-        const contact = salesforceMock.addContact({
+        const _contact = salesforceMock.addContact({
           // Contact doesn't have the matching email
           Email: contactEmail,
           FirstName: "Test",
@@ -289,12 +259,12 @@ describe("SalesforceCRMService", () => {
       });
 
       it("should return contact object(if there is one by that email) even if lead is found by that email", async () => {
-        const crmService = new SalesforceCRMService(credential, appOptions);
+        const crmService = createSalesforceCrmServiceWithSalesforceType(credential, appOptions);
         const contactAccountOwnerEmail = "contact-account-owner@acme.com";
         const contactOwnerEmail = "contact-owner@acme.com";
         const leadOwnerEmail = "lead-owner@acme.com";
         const lookingForEmail = "test1@example.com";
-        const contactEmail = "test2@example.com";
+        const _contactEmail = "test2@example.com";
 
         const account = salesforceMock.addAccount({
           Id: "test-account-id",
@@ -315,7 +285,7 @@ describe("SalesforceCRMService", () => {
           },
         });
 
-        const lead = salesforceMock.addLead({
+        const _lead = salesforceMock.addLead({
           // Lead has the matching email
           Email: lookingForEmail,
           FirstName: "Test",
@@ -341,7 +311,7 @@ describe("SalesforceCRMService", () => {
 
     describe("createContact", () => {
       it("should create a contact under an account if the attendee has an account", async () => {
-        const crmService = new SalesforceCRMService(credential, appOptions);
+        const crmService = createSalesforceCrmServiceWithSalesforceType(credential, appOptions);
         const attendeeEmail = "test@booker.com";
         const account = salesforceMock.addAccount({
           Id: "test-account-id",
@@ -375,7 +345,7 @@ describe("SalesforceCRMService", () => {
       });
 
       it("should create a lead if the attendee has no account", async () => {
-        const crmService = new SalesforceCRMService(credential, appOptions);
+        const crmService = createSalesforceCrmServiceWithSalesforceType(credential, appOptions);
         const attendeeEmail = "test@booker.com";
         const result = await crmService.createContacts([
           {
@@ -396,6 +366,168 @@ describe("SalesforceCRMService", () => {
         const allContactsInSalesforce = salesforceMock.getContacts();
         expect(allContactsInSalesforce).toHaveLength(0);
       });
+    });
+  });
+
+  describe("Token lifecycle management", () => {
+    it("should not refresh token when token_lifetime is valid and not expired", async () => {
+      const now = Date.now();
+      const credential = createMockCredential({
+        issuedAt: String(now),
+        tokenLifetime: 7200,
+      });
+      const { appOptions } = salesforceSettingScenario.createOnLeadAndSearchOnAccount();
+
+      fetchMock.mockReset();
+
+      const crmService = createSalesforceCrmServiceWithSalesforceType(credential, appOptions);
+
+      salesforceMock.addLead({
+        Email: "test@example.com",
+        FirstName: "Test",
+        LastName: "User",
+      });
+
+      await crmService.getContacts({ emails: "test@example.com" });
+
+      expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("should refresh token when token is expired", async () => {
+      const oneHourAgo = Date.now() - 60 * 60 * 1000;
+      const credential = createMockCredential({
+        issuedAt: String(oneHourAgo),
+        tokenLifetime: 1800,
+      });
+      const { appOptions } = salesforceSettingScenario.createOnLeadAndSearchOnAccount();
+
+      fetchMock.mockReset();
+      fetchMock.mockReturnValueOnce(
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              id: "abc",
+              issued_at: String(Date.now()),
+              instance_url: "https://test.salesforce.com",
+              signature: "123",
+              access_token: "new_access_token",
+              scope: "123",
+              token_type: "123",
+            }),
+            { status: 200 }
+          )
+        )
+      );
+
+      const crmService = createSalesforceCrmServiceWithSalesforceType(credential, appOptions);
+
+      salesforceMock.addLead({
+        Email: "test@example.com",
+        FirstName: "Test",
+        LastName: "User",
+      });
+
+      await crmService.getContacts({ emails: "test@example.com" });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://login.salesforce.com/services/oauth2/token",
+        expect.objectContaining({
+          method: "POST",
+        })
+      );
+    });
+
+    it("should refresh token when token_lifetime is missing (legacy credentials)", async () => {
+      const credential = {
+        id: 1,
+        key: {
+          access_token: "test_access_token",
+          refresh_token: "test_refresh_token",
+          instance_url: "https://test.salesforce.com",
+          issued_at: String(Date.now()),
+        },
+        type: "salesforce_other_calendar",
+        user: { email: "test@example.com" },
+        userId: 1,
+        teamId: 1,
+        appId: "test_app_id",
+        invalid: false,
+        delegationCredentialId: null,
+      };
+      const { appOptions } = salesforceSettingScenario.createOnLeadAndSearchOnAccount();
+
+      fetchMock.mockReset();
+      fetchMock.mockReturnValueOnce(
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              id: "abc",
+              issued_at: String(Date.now()),
+              instance_url: "https://test.salesforce.com",
+              signature: "123",
+              access_token: "new_access_token",
+              scope: "123",
+              token_type: "123",
+            }),
+            { status: 200 }
+          )
+        )
+      );
+
+      const crmService = createSalesforceCrmServiceWithSalesforceType(credential, appOptions);
+
+      salesforceMock.addLead({
+        Email: "test@example.com",
+        FirstName: "Test",
+        LastName: "User",
+      });
+
+      await crmService.getContacts({ emails: "test@example.com" });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("should use 5-minute buffer before token expiry", async () => {
+      const tokenLifetime = 7200;
+      const bufferMs = 5 * 60 * 1000;
+      const issuedAt = Date.now() - (tokenLifetime * 1000 - bufferMs + 1000);
+
+      const credential = createMockCredential({
+        issuedAt: String(issuedAt),
+        tokenLifetime,
+      });
+      const { appOptions } = salesforceSettingScenario.createOnLeadAndSearchOnAccount();
+
+      fetchMock.mockReset();
+      fetchMock.mockReturnValueOnce(
+        Promise.resolve(
+          new Response(
+            JSON.stringify({
+              id: "abc",
+              issued_at: String(Date.now()),
+              instance_url: "https://test.salesforce.com",
+              signature: "123",
+              access_token: "new_access_token",
+              scope: "123",
+              token_type: "123",
+            }),
+            { status: 200 }
+          )
+        )
+      );
+
+      const crmService = createSalesforceCrmServiceWithSalesforceType(credential, appOptions);
+
+      salesforceMock.addLead({
+        Email: "test@example.com",
+        FirstName: "Test",
+        LastName: "User",
+      });
+
+      await crmService.getContacts({ emails: "test@example.com" });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
     });
   });
 });

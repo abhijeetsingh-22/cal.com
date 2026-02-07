@@ -1,5 +1,4 @@
-import type { DestinationCalendar } from "@prisma/client";
-
+import type { DestinationCalendar } from "@calcom/prisma/client";
 import type {
   AdditionalInformation,
   CalendarEvent,
@@ -31,9 +30,13 @@ class CalendarEventClass implements CalendarEvent {
   rejectionReason?: string | null;
   hideCalendarNotes?: boolean;
   hideCalendarEventDetails?: boolean;
+  hideOrganizerEmail?: boolean;
   additionalNotes?: string | null | undefined;
   recurrence?: string;
   iCalUID?: string | null;
+  iCalSequence?: number | null;
+  customReplyToEmail?: string | null;
+  organizationId?: number | null;
 
   constructor(initProps?: CalendarEvent) {
     // If more parameters are given we update this

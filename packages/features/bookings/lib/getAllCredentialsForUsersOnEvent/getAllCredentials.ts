@@ -1,10 +1,10 @@
-import type z from "zod";
+import type { z } from "zod";
 
-import { enrichUserWithDelegationCredentialsWithoutOrgId } from "@calcom/lib/delegationCredential/server";
-import { UserRepository } from "@calcom/lib/server/repository/user";
+import { enrichUserWithDelegationCredentialsIncludeServiceAccountKey } from "@calcom/app-store/delegationCredential";
+import { eventTypeAppMetadataOptionalSchema } from "@calcom/app-store/zod-utils";
+import { UserRepository } from "@calcom/features/users/repositories/UserRepository";
 import prisma from "@calcom/prisma";
 import { credentialForCalendarServiceSelect } from "@calcom/prisma/selects/credential";
-import { eventTypeAppMetadataOptionalSchema } from "@calcom/prisma/zod-utils";
 import type { EventTypeMetaDataSchema } from "@calcom/prisma/zod-utils";
 import type { CredentialPayload } from "@calcom/types/Credential";
 
@@ -19,13 +19,12 @@ export type EventType = {
  * Gets credentials from the user, team, and org if applicable
  *
  */
-export const getAllCredentials = async (
+export const getAllCredentialsIncludeServiceAccountKey = async (
   user: { id: number; username: string | null; email: string; credentials: CredentialPayload[] },
   eventType: EventType
 ) => {
-  let allCredentials = user.credentials;
-
-  // If it's a team event type query for team credentials
+  let allCredentials = Array.isArray(user.credentials) ? user.credentials : [];
+ 
   if (eventType?.team?.id) {
     const teamCredentialsQuery = await prisma.credential.findMany({
       where: {
@@ -33,10 +32,11 @@ export const getAllCredentials = async (
       },
       select: credentialForCalendarServiceSelect,
     });
+    if (Array.isArray(teamCredentialsQuery)) {
     allCredentials.push(...teamCredentialsQuery);
+    }
   }
-
-  // If it's a managed event type, query for the parent team's credentials
+  
   if (eventType?.parentId) {
     const teamCredentialsQuery = await prisma.team.findFirst({
       where: {
@@ -52,16 +52,15 @@ export const getAllCredentials = async (
         },
       },
     });
-    if (teamCredentialsQuery?.credentials) {
-      allCredentials.push(...teamCredentialsQuery?.credentials);
+    if (teamCredentialsQuery?.credentials && Array.isArray(teamCredentialsQuery.credentials)) {
+      allCredentials.push(...teamCredentialsQuery.credentials);
     }
   }
 
-  const { profile } = await UserRepository.enrichUserWithItsProfile({
+  const { profile } = await new UserRepository(prisma).enrichUserWithItsProfile({
     user: user,
   });
-
-  // If the user is a part of an organization, query for the organization's credentials
+  
   if (profile?.organizationId) {
     const org = await prisma.team.findUnique({
       where: {
@@ -74,7 +73,7 @@ export const getAllCredentials = async (
       },
     });
 
-    if (org?.credentials) {
+    if (org?.credentials && Array.isArray(org.credentials)) {
       allCredentials.push(...org.credentials);
     }
   }
@@ -120,7 +119,7 @@ export const getAllCredentials = async (
     }
   });
 
-  const userWithDelegationCredentials = await enrichUserWithDelegationCredentialsWithoutOrgId({
+  const userWithDelegationCredentials = await enrichUserWithDelegationCredentialsIncludeServiceAccountKey({
     user: { ...user, credentials: allCredentials },
   });
 

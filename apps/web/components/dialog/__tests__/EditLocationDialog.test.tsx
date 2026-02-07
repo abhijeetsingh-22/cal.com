@@ -11,12 +11,26 @@ import { EditLocationDialog } from "../EditLocationDialog";
 vi.mock("@calcom/trpc/react", () => ({
   trpc: {
     viewer: {
-      locationOptions: {
-        useQuery: vi.fn(),
+      apps: {
+        locationOptions: {
+          useQuery: vi.fn(),
+        },
       },
     },
   },
 }));
+
+vi.mock("next/navigation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next/navigation")>();
+  return {
+    ...actual,
+    useRouter: vi.fn(() => ({
+      push: vi.fn(() => {
+        return;
+      }),
+    })),
+  };
+});
 
 vi.mock("@calcom/lib/hooks/useLocale", () => ({
   useLocale: () => ({ t: (key: string) => key }),
@@ -32,8 +46,8 @@ vi.mock("@calcom/features/form/components/LocationSelect", () => {
   };
 });
 
-const AttendeePhoneNumberLabel = "Attendee Phone Number";
-const OrganizerPhoneLabel = "Organizer Phone Number";
+const AttendeePhoneNumberLabel = "Attendee phone number";
+const OrganizerPhoneLabel = "Phone call";
 const CampfireLabel = "Campfire";
 const ZoomVideoLabel = "Zoom Video";
 const OrganizerDefaultConferencingAppLabel = "Organizer's default app";
@@ -67,7 +81,7 @@ describe("EditLocationDialog", () => {
               },
               {
                 value: "integrations:daily",
-                label: "Cal Video (Global)",
+                label: "Cal Video (Default)",
                 disabled: false,
                 icon: "/app-store/dailyvideo/icon.svg",
                 slug: "daily-video",
@@ -188,7 +202,7 @@ describe("EditLocationDialog", () => {
   });
 
   describe("Team Booking Case", () => {
-    it("should not show Attendee Phone Number but show Organizer Phone Number and dynamic link Conferencing apps", async () => {
+    it("should not show Attendee Phone Number but show Phone Call option and dynamic link Conferencing apps", async () => {
       render(<EditLocationDialog {...mockProps} booking={{ location: "Office" }} teamId={1} />);
 
       expect(screen.queryByText(AttendeePhoneNumberLabel)).not.toBeInTheDocument();

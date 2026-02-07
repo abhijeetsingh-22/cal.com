@@ -1,27 +1,40 @@
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import process from "node:process";
+import type { AppMeta } from "@calcom/types/App";
+import { AppMetaSchema } from "@calcom/types/AppMetaSchema";
 import chokidar from "chokidar";
-import fs from "fs";
 // eslint-disable-next-line no-restricted-imports
 import { debounce } from "lodash";
-import path from "path";
-import prettier from "prettier";
-
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-//@ts-ignore
-import prettierConfig from "@calcom/config/prettier-preset";
-import type { AppMeta } from "@calcom/types/App";
-
 import { APP_STORE_PATH } from "./constants";
 import { getAppName } from "./utils/getAppName";
 
 const isInWatchMode = process.argv[2] === "--watch";
 
-const formatOutput = (source: string) =>
-  prettier.format(source, {
-    parser: "babel",
-    ...prettierConfig,
-  });
+const repoRoot = path.resolve(__dirname, "../../..");
 
-const getVariableName = (appName: string) => appName.replace(/[-.]/g, "_");
+const formatFileWithBiome = (filePath: string) => {
+  // Normalize to forward slashes for cross-platform Biome compatibility
+  const normalizedPath = filePath.replace(/\\/g, "/");
+  const { status } = spawnSync(
+    "yarn",
+    ["biome", "format", "--write", "--no-errors-on-unmatched", normalizedPath],
+    {
+      stdio: "inherit",
+      cwd: repoRoot,
+      shell: true,
+    }
+  );
+
+  if (status !== 0) {
+    throw new Error(`Biome formatting failed for ${filePath}`);
+  }
+};
+
+const formatOutput = (source: string) => source;
+
+const getVariableName = (appName: string) => appName.replace(/[-./]/g, "_");
 
 // INFO: Handle stripe separately as it's an old app with different dirName than slug/appId
 const getAppId = (app: { name: string }) => (app.name === "stripepayment" ? "stripe" : app.name);
@@ -40,9 +53,9 @@ function generateFiles() {
   const crmOutput = [];
   const appDirs: { name: string; path: string }[] = [];
 
-  fs.readdirSync(`${APP_STORE_PATH}`).forEach(function (dir) {
+  fs.readdirSync(`${APP_STORE_PATH}`).forEach((dir) => {
     if (dir === "ee" || dir === "templates") {
-      fs.readdirSync(path.join(APP_STORE_PATH, dir)).forEach(function (subDir) {
+      fs.readdirSync(path.join(APP_STORE_PATH, dir)).forEach((subDir) => {
         if (fs.statSync(path.join(APP_STORE_PATH, dir, subDir)).isDirectory()) {
           if (getAppName(subDir)) {
             appDirs.push({
@@ -69,10 +82,17 @@ function generateFiles() {
     for (let i = 0; i < appDirs.length; i++) {
       const configPath = path.join(APP_STORE_PATH, appDirs[i].path, "config.json");
       const metadataPath = path.join(APP_STORE_PATH, appDirs[i].path, "_metadata.ts");
-      let app;
+      let app: AppMetaSchema;
 
       if (fs.existsSync(configPath)) {
-        app = JSON.parse(fs.readFileSync(configPath).toString());
+        try {
+          const rawConfig = fs.readFileSync(configPath, "utf8");
+          const parsedConfig = JSON.parse(rawConfig);
+          app = AppMetaSchema.parse(parsedConfig);
+        } catch (error) {
+          const prefix = `Config error in ${path.join(APP_STORE_PATH, appDirs[i].path, "config.json")}`;
+          throw new Error(`${prefix}: ${error instanceof Error ? error.message : String(error)}`);
+        }
       } else if (fs.existsSync(metadataPath)) {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         app = require(metadataPath).metadata;
@@ -116,7 +136,7 @@ function generateFiles() {
         {
           fileToBeImported: string;
           importName: string;
-        }
+        },
       ];
 
   /**
@@ -210,9 +230,9 @@ function generateFiles() {
     }
 
     function getChosenImportConfig(importConfig: ImportConfig, app: { path: string }) {
-      let chosenConfig;
+      let chosenConfig: ImportConfig;
 
-      if (!(importConfig instanceof Array)) {
+      if (!Array.isArray(importConfig)) {
         chosenConfig = importConfig;
       } else {
         if (fs.existsSync(path.join(APP_STORE_PATH, app.path, importConfig[0].fileToBeImported))) {
@@ -345,12 +365,147 @@ function generateFiles() {
     )
   );
 
+  const calendarOutput = [];
+  const calendarServices = getExportedObject(
+    "CalendarServiceMap",
+    {
+      importConfig: {
+        fileToBeImported: "lib/CalendarService.ts",
+        importName: "default",
+      },
+      lazyImport: true,
+    },
+    isCalendarApp
+  );
+
+  // Find the export line and wrap it with E2E conditional
+  const exportLineIndex = calendarServices.findIndex((line) =>
+    line.startsWith("export const CalendarServiceMap")
+  );
+  if (exportLineIndex !== -1) {
+    const exportLine = calendarServices[exportLineIndex];
+    const objectContent = calendarServices.slice(exportLineIndex + 1, -1); // Remove export line and closing brace
+
+    calendarOutput.push(
+      exportLine.replace(
+        "export const CalendarServiceMap = {",
+        "export const CalendarServiceMap = process.env.NEXT_PUBLIC_IS_E2E === '1' ? {} : {"
+      ),
+      ...objectContent,
+      "};"
+    );
+  } else {
+    calendarOutput.push(...calendarServices);
+  }
+
+  const analyticsOutput = [];
+  const analyticsServices = getExportedObject(
+    "AnalyticsServiceMap",
+    {
+      importConfig: {
+        fileToBeImported: "lib/AnalyticsService.ts",
+        importName: "default",
+      },
+      lazyImport: true,
+    },
+    (app: App) => {
+      const hasAnalyticsService = fs.existsSync(
+        path.join(APP_STORE_PATH, app.path, "lib/AnalyticsService.ts")
+      );
+      return hasAnalyticsService;
+    }
+  );
+
+  const analyticsExportLineIndex = analyticsServices.findIndex((line) =>
+    line.startsWith("export const AnalyticsServiceMap")
+  );
+  if (analyticsExportLineIndex !== -1) {
+    const exportLine = analyticsServices[analyticsExportLineIndex];
+    const objectContent = analyticsServices.slice(analyticsExportLineIndex + 1, -1);
+
+    analyticsOutput.push(
+      exportLine.replace(
+        "export const AnalyticsServiceMap = {",
+        "export const AnalyticsServiceMap = process.env.NEXT_PUBLIC_IS_E2E === '1' ? {} : {"
+      ),
+      ...objectContent,
+      "};"
+    );
+  } else {
+    analyticsOutput.push(...analyticsServices);
+  }
+
+  const paymentOutput = [];
+  const paymentServices = getExportedObject(
+    "PaymentServiceMap",
+    {
+      importConfig: {
+        fileToBeImported: "lib/PaymentService.ts",
+        importName: "PaymentService",
+      },
+      lazyImport: true,
+    },
+    (app: App) => {
+      const hasPaymentService = fs.existsSync(path.join(APP_STORE_PATH, app.path, "lib/PaymentService.ts"));
+      return hasPaymentService;
+    }
+  );
+
+  paymentOutput.push(...paymentServices);
+
+  const videoOutput = [];
+  const videoAdapters = getExportedObject(
+    "VideoApiAdapterMap",
+    {
+      importConfig: {
+        fileToBeImported: "lib/VideoApiAdapter.ts",
+        importName: "default",
+      },
+      lazyImport: true,
+    },
+    (app: App) => {
+      return fs.existsSync(path.join(APP_STORE_PATH, app.path, "lib/VideoApiAdapter.ts"));
+    }
+  );
+
+  const videoExportLineIndex = videoAdapters.findIndex((line) =>
+    line.startsWith("export const VideoApiAdapterMap")
+  );
+  if (videoExportLineIndex !== -1) {
+    const exportLine = videoAdapters[videoExportLineIndex];
+    const objectContent = videoAdapters.slice(videoExportLineIndex + 1, -1);
+
+    videoOutput.push(
+      exportLine.replace(
+        "export const VideoApiAdapterMap = {",
+        "export const VideoApiAdapterMap = process.env.NEXT_PUBLIC_IS_E2E === '1' ? {} : {"
+      ),
+      ...objectContent,
+      "};"
+    );
+  } else {
+    videoOutput.push(...videoAdapters);
+  }
+
+  // Generate redirect apps list (apps with externalLink in their config, excluding templates)
+  const redirectAppsOutput: string[] = [];
+  const redirectAppSlugs: string[] = [];
+  forEachAppDir((app) => {
+    // Exclude templates - they are not actual apps
+    if (app.externalLink && !app.path.startsWith("templates/")) {
+      redirectAppSlugs.push(app.name);
+    }
+  });
+  redirectAppsOutput.push(`export const REDIRECT_APPS = ${JSON.stringify(redirectAppSlugs)} as const;`);
+  redirectAppsOutput.push(`export type RedirectApp = typeof REDIRECT_APPS[number];`);
+
   const banner = `/**
     This file is autogenerated using the command \`yarn app-store:build --watch\`.
     Don't modify this file manually.
 **/
 `;
   const filesToGenerate: [string, string[]][] = [
+    ["analytics.services.generated.ts", analyticsOutput],
     ["apps.metadata.generated.ts", metadataOutput],
     ["apps.server.generated.ts", serverOutput],
     ["apps.browser.generated.tsx", browserOutput],
@@ -358,9 +513,15 @@ function generateFiles() {
     ["apps.keys-schemas.generated.ts", appKeysSchemasOutput],
     ["bookerApps.metadata.generated.ts", bookerMetadataOutput],
     ["crm.apps.generated.ts", crmOutput],
+    ["calendar.services.generated.ts", calendarOutput],
+    ["payment.services.generated.ts", paymentOutput],
+    ["video.adapters.generated.ts", videoOutput],
+    ["redirect-apps.generated.ts", redirectAppsOutput],
   ];
   filesToGenerate.forEach(([fileName, output]) => {
-    fs.writeFileSync(`${APP_STORE_PATH}/${fileName}`, formatOutput(`${banner}${output.join("\n")}`));
+    const filePath = path.join(APP_STORE_PATH, fileName);
+    fs.writeFileSync(filePath, formatOutput(`${banner}${output.join("\n")}`));
+    formatFileWithBiome(filePath);
   });
   console.log(`Generated ${filesToGenerate.map(([fileName]) => fileName).join(", ")}`);
 }
@@ -404,4 +565,8 @@ function isBookerApp(app: App) {
 
 function isCrmApp(app: App) {
   return !!app.categories?.includes("crm");
+}
+
+function isCalendarApp(app: App) {
+  return !!app.categories?.includes("calendar");
 }

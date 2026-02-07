@@ -1,29 +1,52 @@
 import { EmailService } from "@/modules/email/email.service";
-import { OrganizationsTeamsService } from "@/modules/organizations/teams/index/services/organizations-teams.service";
 import { CreateOrganizationUserInput } from "@/modules/organizations/users/index/inputs/create-organization-user.input";
 import { UpdateOrganizationUserInput } from "@/modules/organizations/users/index/inputs/update-organization-user.input";
 import { OrganizationsUsersRepository } from "@/modules/organizations/users/index/organizations-users.repository";
 import { CreateUserInput } from "@/modules/users/inputs/create-user.input";
-import { Injectable, ConflictException } from "@nestjs/common";
-import { Team, CreationSource } from "@prisma/client";
+import { Injectable, ConflictException, ForbiddenException } from "@nestjs/common";
 import { plainToInstance } from "class-transformer";
 
-import { createNewUsersConnectToOrgIfExists } from "@calcom/platform-libraries";
+import { createNewUsersConnectToOrgIfExists, CreationSource } from "@calcom/platform-libraries";
+import type { Team } from "@calcom/prisma/client";
 
 @Injectable()
 export class OrganizationsUsersService {
   constructor(
     private readonly organizationsUsersRepository: OrganizationsUsersRepository,
-    private readonly organizationsTeamsService: OrganizationsTeamsService,
     private readonly emailService: EmailService
   ) {}
 
-  async getUsers(orgId: number, emailInput?: string[], skip?: number, take?: number) {
+  async getUsers(
+    orgId: number,
+    emailInput?: string[],
+    filters?: {
+      teamIds?: number[];
+      assignedOptionIds?: string[];
+      attributeQueryOperator?: "AND" | "OR" | "NONE";
+    },
+    skip?: number,
+    take?: number
+  ) {
     const emailArray = !emailInput ? [] : emailInput;
+
+    if (filters?.assignedOptionIds && filters?.assignedOptionIds?.length) {
+      return await this.organizationsUsersRepository.getOrganizationUsersByEmailsAndAttributeFilters(
+        orgId,
+        {
+          assignedOptionIds: filters.assignedOptionIds,
+          attributeQueryOperator: filters?.attributeQueryOperator ?? "AND",
+          teamIds: filters?.teamIds,
+        },
+        emailArray,
+        skip,
+        take
+      );
+    }
 
     const users = await this.organizationsUsersRepository.getOrganizationUsersByEmails(
       orgId,
       emailArray,
+      filters?.teamIds,
       skip,
       take
     );
@@ -45,13 +68,11 @@ export class OrganizationsUsersService {
       await this.checkForUsernameConflicts(org.id, userCreateBody.username);
     }
 
-    const usernameOrEmail = userCreateBody.username ? userCreateBody.username : userCreateBody.email;
-
     // Create new org user
     const createdUserCall = await createNewUsersConnectToOrgIfExists({
       invitations: [
         {
-          usernameOrEmail: usernameOrEmail,
+          usernameOrEmail: userCreateBody.email,
           role: userCreateBody.organizationRole,
         },
       ],
@@ -61,11 +82,12 @@ export class OrganizationsUsersService {
       parentId: null,
       autoAcceptEmailDomain: "not-required-for-this-endpoint",
       orgConnectInfoByUsernameOrEmail: {
-        [usernameOrEmail]: {
+        [userCreateBody.email]: {
           orgId: org.id,
           autoAccept: userCreateBody.autoAccept,
         },
       },
+      language: "en",
     });
 
     const createdUser = createdUserCall[0];
@@ -82,7 +104,7 @@ export class OrganizationsUsersService {
 
     // Need to send email to new user to create password
     await this.emailService.sendSignupToOrganizationEmail({
-      usernameOrEmail,
+      usernameOrEmail: userCreateBody.email,
       orgName: org.name,
       orgId: org.id,
       locale: user?.locale,
@@ -117,5 +139,15 @@ export class OrganizationsUsersService {
     );
 
     if (isUsernameTaken) throw new ConflictException("Username is already taken");
+  }
+
+  async getUsersByIds(orgId: number, userIds: number[]) {
+    const orgUsers = await this.organizationsUsersRepository.getOrganizationUsersByIds(orgId, userIds);
+
+    if (!orgUsers?.length) {
+      throw new ForbiddenException("Provided user ids does not belong to the organization.");
+    }
+
+    return orgUsers;
   }
 }

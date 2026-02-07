@@ -1,13 +1,14 @@
 import type { Dispatch, SetStateAction } from "react";
 import { useState } from "react";
 
+import { Dialog } from "@calcom/features/components/controlled-dialog";
 import { useLocale } from "@calcom/lib/hooks/useLocale";
-import { Icon } from "@calcom/ui/components/icon";
-import { Input } from "@calcom/ui/components/form";
+import classNames from "@calcom/ui/classNames";
 import { Alert } from "@calcom/ui/components/alert";
 import { Button } from "@calcom/ui/components/button";
-import classNames from "@calcom/ui/classNames";
-import { Dialog, DialogContent, DialogFooter, DialogClose } from "@calcom/ui/components/dialog";
+import { DialogContent, DialogFooter, DialogClose } from "@calcom/ui/components/dialog";
+import { Input } from "@calcom/ui/components/form";
+import { Icon } from "@calcom/ui/components/icon";
 import type { IconName } from "@calcom/ui/components/icon";
 
 interface ISearchDialog {
@@ -117,7 +118,7 @@ export const SearchDialog = (props: ISearchDialog) => {
   return (
     <Dialog open={isOpenDialog} onOpenChange={setIsOpenDialog}>
       <DialogContent>
-        <h3 className="leading-16 font-cal text-emphasis text-xl" id="modal-title">
+        <h3 className="font-cal text-emphasis text-xl" id="modal-title">
           {t("add_gif_to_confirmation")}
         </h3>
         <p className="text-subtle mb-3 text-sm font-light">{t("find_gif_spice_confirmation")}</p>
@@ -126,7 +127,7 @@ export const SearchDialog = (props: ISearchDialog) => {
           {renderTab("link", t("add_link_from_giphy"), MODE_URL)}
         </div>
         <form
-          className="flex w-full justify-center space-x-2 space-y-2 rtl:space-x-reverse"
+          className="flex w-full justify-center space-x-2 stack-y-2 rtl:space-x-reverse"
           onSubmit={handleFormSubmit}>
           <div className="relative block w-full pt-2">
             <Input
@@ -147,7 +148,7 @@ export const SearchDialog = (props: ISearchDialog) => {
           </Button>
         </form>
         {gifImage && (
-          <div className="flex flex-col items-center space-x-2 space-y-2 pt-3 rtl:space-x-reverse">
+          <div className="flex flex-col items-center space-x-2 stack-y-2 pt-3 rtl:space-x-reverse">
             <div className="bg-subtle flex w-full items-center justify-center">
               {isPending ? (
                 <div className="flex h-[200px] w-full items-center justify-center bg-gray-400 pb-3 pt-3">
@@ -191,7 +192,7 @@ export const SearchDialog = (props: ISearchDialog) => {
             </Button>
           </div>
         )}
-        <DialogFooter>
+        <DialogFooter noSticky>
           <DialogClose
             color="minimal"
             tabIndex={-1}

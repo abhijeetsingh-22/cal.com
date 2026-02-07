@@ -1,6 +1,6 @@
+import { enrichUserWithDelegationCredentialsIncludeServiceAccountKey } from "@calcom/app-store/delegationCredential";
 import dayjs from "@calcom/dayjs";
-import { getBusyCalendarTimes } from "@calcom/lib/CalendarManager";
-import { enrichUserWithDelegationCredentialsWithoutOrgId } from "@calcom/lib/delegationCredential/server";
+import { getBusyCalendarTimes } from "@calcom/features/calendars/lib/CalendarManager";
 import { prisma } from "@calcom/prisma";
 import type { EventBusyDate } from "@calcom/types/Calendar";
 
@@ -41,10 +41,12 @@ export const calendarOverlayHandler = async ({ ctx, input }: ListOptions) => {
       id: true,
       type: true,
       key: true,
+      encryptedKey: true,
       userId: true,
       teamId: true,
       appId: true,
       invalid: true,
+      delegationCredentialId: true,
       user: {
         select: {
           email: true,
@@ -53,7 +55,7 @@ export const calendarOverlayHandler = async ({ ctx, input }: ListOptions) => {
     },
   });
 
-  const { credentials } = await enrichUserWithDelegationCredentialsWithoutOrgId({
+  const { credentials } = await enrichUserWithDelegationCredentialsIncludeServiceAccountKey({
     user: {
       ...user,
       credentials: nonDelegationCredentials,
@@ -82,13 +84,24 @@ export const calendarOverlayHandler = async ({ ctx, input }: ListOptions) => {
     };
   });
 
-  // get all clanedar services
-  const calendarBusyTimes = await getBusyCalendarTimes(
+  // get all calendar services
+  // Use "overlay" mode to bypass cache for overlay calendar availability
+  const calendarBusyTimesQuery = await getBusyCalendarTimes(
     credentials,
     dateFrom,
     dateTo,
-    composedSelectedCalendars
+    composedSelectedCalendars,
+    "overlay"
   );
+
+  if (!calendarBusyTimesQuery.success) {
+    throw new TRPCError({
+      code: "INTERNAL_SERVER_ERROR",
+      message: "Failed to fetch busy calendar times",
+    });
+  }
+
+  const calendarBusyTimes = calendarBusyTimesQuery.data;
 
   // Convert to users timezone
 

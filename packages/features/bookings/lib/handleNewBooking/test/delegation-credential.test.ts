@@ -20,8 +20,7 @@ import {
   createDelegationCredential,
   createOrganization,
   buildDelegationCredential,
-} from "@calcom/web/test/utils/bookingScenario/bookingScenario";
-import { createMockNextJsRequest } from "@calcom/web/test/utils/bookingScenario/createMockNextJsRequest";
+} from "@calcom/testing/lib/bookingScenario/bookingScenario";
 import {
   expectWorkflowToBeTriggered,
   expectSuccessfulBookingCreationEmails,
@@ -31,19 +30,124 @@ import {
   expectICalUIDAsString,
   expectBookingToNotHaveReference,
   expectNoAttemptToCreateCalendarEvent,
-} from "@calcom/web/test/utils/bookingScenario/expects";
+} from "@calcom/testing/lib/bookingScenario/expects";
 import {
   getMockRequestDataForBooking,
   getMockRequestDataForDynamicGroupBooking,
-} from "@calcom/web/test/utils/bookingScenario/getMockRequestDataForBooking";
-import { setupAndTeardown } from "@calcom/web/test/utils/bookingScenario/setupAndTeardown";
+} from "@calcom/testing/lib/bookingScenario/getMockRequestDataForBooking";
+import { setupAndTeardown } from "@calcom/testing/lib/bookingScenario/setupAndTeardown";
 
+import { vi } from "vitest";
 import { describe, expect } from "vitest";
 
 import { appStoreMetadata } from "@calcom/app-store/appStoreMetaData";
 import { BookingStatus } from "@calcom/prisma/enums";
 import { MembershipRole } from "@calcom/prisma/enums";
-import { test } from "@calcom/web/test/fixtures/fixtures";
+import { test } from "@calcom/testing/lib/fixtures/fixtures";
+
+import { getNewBookingHandler } from "./getNewBookingHandler";
+
+vi.mock("@calcom/app-store/calendar.services.generated", () => {
+  class MockGoogleCalendarService {
+    credential: any;
+
+    constructor(credential: any) {
+      this.credential = credential;
+    }
+
+    getCredentialId() {
+      return this.credential.id;
+    }
+
+    async createEvent(calEvent: any, credentialId: any, externalCalendarId?: string) {
+      return {
+        type: "google_calendar",
+        additionalInfo: {
+          hangoutLink: "https://GOOGLE_MEET_URL_IN_CALENDAR_EVENT",
+        },
+        uid: "GOOGLE_CALENDAR_EVENT_ID",
+        id: "GOOGLE_CALENDAR_EVENT_ID",
+        iCalUID: calEvent.iCalUID || "GOOGLE_CALENDAR_EVENT_ID",
+        password: "MOCK_PASSWORD",
+        url: "https://GOOGLE_MEET_URL_IN_CALENDAR_EVENT",
+        createdEvent: {
+          hangoutLink: "https://GOOGLE_MEET_URL_IN_CALENDAR_EVENT",
+        },
+      };
+    }
+
+    async updateEvent() {
+      return {};
+    }
+
+    async deleteEvent() {
+      return {};
+    }
+
+    async getAvailability() {
+      return [];
+    }
+
+    async getAvailabilityWithTimeZones() {
+      return [];
+    }
+
+    async listCalendars() {
+      return [];
+    }
+  }
+
+  class MockOffice365CalendarService {
+    credential: any;
+
+    constructor(credential: any) {
+      this.credential = credential;
+    }
+
+    getCredentialId() {
+      return this.credential.id;
+    }
+
+    async createEvent(calEvent: any, credentialId: any, externalCalendarId?: string) {
+      return {
+        type: "office365_calendar",
+        additionalInfo: {},
+        uid: "OFFICE_365_CALENDAR_EVENT_ID",
+        id: "OFFICE_365_CALENDAR_EVENT_ID",
+        iCalUID: calEvent.iCalUID || "OFFICE_365_CALENDAR_EVENT_ID",
+        password: "MOCK_PASSWORD",
+        url: "https://UNUSED_URL",
+      };
+    }
+
+    async updateEvent() {
+      return {};
+    }
+
+    async deleteEvent() {
+      return {};
+    }
+
+    async getAvailability() {
+      return [];
+    }
+
+    async getAvailabilityWithTimeZones() {
+      return [];
+    }
+
+    async listCalendars() {
+      return [];
+    }
+  }
+
+  return {
+    CalendarServiceMap: {
+      googlecalendar: Promise.resolve({ default: MockGoogleCalendarService }),
+      office365calendar: Promise.resolve({ default: MockOffice365CalendarService }),
+    },
+  };
+});
 
 // Local test runs sometime gets too slow
 const timeout = process.env.CI ? 5000 : 20000;
@@ -52,13 +156,13 @@ describe("handleNewBooking", () => {
   setupAndTeardown();
   describe("Delegation Credential", () => {
     test(
-      `should create a successful booking using the delegation credential
+      `should create a successful booking using the delegation credential when User's destination calendar is set toGoogle Calendar
       1. Should create a booking in the database with reference having Delegation credential
       2. Should create an event in calendar with Delegation credential
       3. Should use Google Meet as the location even when not explicitly set.
 `,
       async ({ emails }) => {
-        const handleNewBooking = (await import("@calcom/features/bookings/lib/handleNewBooking")).default;
+        const handleNewBooking = getNewBookingHandler();
 
         const org = await createOrganization({
           name: "Test Org",
@@ -137,7 +241,7 @@ describe("handleNewBooking", () => {
         );
 
         // Mock a Scenario where iCalUID isn't returned by Google Calendar in which case booking UID is used as the ics UID
-        const calendarMock = mockCalendarToHaveNoBusySlots("googlecalendar", {
+        const calendarMock = await mockCalendarToHaveNoBusySlots("googlecalendar", {
           create: {
             id: "GOOGLE_CALENDAR_EVENT_ID",
             uid: "MOCK_ID",
@@ -160,12 +264,9 @@ describe("handleNewBooking", () => {
           },
         });
 
-        const { req } = createMockNextJsRequest({
-          method: "POST",
-          body: mockBookingData,
+        const createdBooking = await handleNewBooking({
+          bookingData: mockBookingData,
         });
-
-        const createdBooking = await handleNewBooking(req);
 
         expect(createdBooking.responses).toEqual(
           expect.objectContaining({
@@ -234,12 +335,190 @@ describe("handleNewBooking", () => {
     );
 
     test(
+      `should create a successful booking using the delegation credential event when User/EventType's destination calendar is not set
+      1. Should create a booking in the database with reference having Delegation credential
+      2. Should create an event in calendar with Delegation credential
+      3. Should use Google Meet as the location even when not explicitly set and no destination calendar is set for User/EventType
+`,
+      async ({ emails }) => {
+        const handleNewBooking = getNewBookingHandler();
+
+        const org = await createOrganization({
+          name: "Test Org",
+          slug: "testorg",
+        });
+
+        const payloadToMakePartOfOrganization = [
+          {
+            membership: {
+              accepted: true,
+              role: MembershipRole.ADMIN,
+            },
+            team: {
+              id: org.id,
+              name: "Test Org",
+              slug: "testorg",
+            },
+          },
+        ];
+
+        const booker = getBooker({
+          email: "booker@example.com",
+          name: "Booker",
+        });
+
+        const organizer = getOrganizer({
+          name: "Organizer",
+          email: "organizer@example.com",
+          id: 101,
+          schedules: [TestData.schedules.IstWorkHours],
+          selectedCalendars: [TestData.selectedCalendars.google],
+          // User must be part of organization to be able to use that organization's Delegation credential
+          teams: payloadToMakePartOfOrganization,
+          // No regular credentials provided
+          credentials: [],
+        });
+
+        const delegationCredential = await createDelegationCredential(org.id);
+        const payloadToCreateUserEventTypeForOrganizer = {
+          id: 1,
+          slotInterval: 30,
+          length: 30,
+          users: [
+            {
+              id: organizer.id,
+            },
+          ],
+        };
+
+        await createBookingScenario(
+          getScenarioData({
+            webhooks: [
+              {
+                userId: organizer.id,
+                eventTriggers: ["BOOKING_CREATED"],
+                subscriberUrl: "http://my-webhook.example.com",
+                active: true,
+                eventTypeId: 1,
+                appId: null,
+              },
+            ],
+            workflows: [
+              {
+                userId: organizer.id,
+                trigger: "NEW_EVENT",
+                action: "EMAIL_HOST",
+                template: "REMINDER",
+                activeOn: [1],
+              },
+            ],
+            eventTypes: [payloadToCreateUserEventTypeForOrganizer],
+            organizer,
+            apps: [TestData.apps["daily-video"], TestData.apps["google-calendar"]],
+          })
+        );
+
+        // Mock a Scenario where iCalUID isn't returned by Google Calendar in which case booking UID is used as the ics UID
+        const calendarMock = await mockCalendarToHaveNoBusySlots("googlecalendar", {
+          create: {
+            id: "GOOGLE_CALENDAR_EVENT_ID",
+            uid: "MOCK_ID",
+            appSpecificData: {
+              googleCalendar: {
+                hangoutLink: "https://GOOGLE_MEET_URL_IN_CALENDAR_EVENT",
+              },
+            },
+          },
+        });
+
+        const mockBookingData = getMockRequestDataForBooking({
+          data: {
+            eventTypeId: 1,
+            responses: {
+              email: booker.email,
+              name: booker.name,
+              location: { optionValue: "", value: BookingLocations.GoogleMeet },
+            },
+          },
+        });
+
+        const createdBooking = await handleNewBooking({
+          bookingData: mockBookingData,
+        });
+
+        expect(createdBooking.responses).toEqual(
+          expect.objectContaining({
+            email: booker.email,
+            name: booker.name,
+          })
+        );
+
+        expect(createdBooking).toEqual(
+          expect.objectContaining({
+            location: BookingLocations.GoogleMeet,
+          })
+        );
+
+        await expectBookingToBeInDatabase({
+          description: "",
+          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+          uid: createdBooking.uid!,
+          eventTypeId: mockBookingData.eventTypeId,
+          status: BookingStatus.ACCEPTED,
+          references: [
+            {
+              type: appStoreMetadata.googlecalendar.type,
+              uid: "GOOGLE_CALENDAR_EVENT_ID",
+              meetingId: "GOOGLE_CALENDAR_EVENT_ID",
+              meetingPassword: "MOCK_PASSWORD",
+              meetingUrl: "https://GOOGLE_MEET_URL_IN_CALENDAR_EVENT",
+              // Verify Delegation credential was used
+              delegationCredentialId: delegationCredential.id,
+            },
+          ],
+          iCalUID: createdBooking.iCalUID,
+        });
+
+        expectWorkflowToBeTriggered({ emailsToReceive: [organizer.email], emails });
+        expectSuccessfulCalendarEventCreationInCalendar(calendarMock, {
+          credential: buildDelegationCredential({
+            serviceAccountKey: delegationCredential.serviceAccountKey,
+          }),
+          calendarIdUsingFallbackOfFirstCalendarCredential: TestData.selectedCalendars.google.externalId,
+          // There would be no videoCallUrl in this case as it is not a dedicated conferencing case and hangoutLink is used instead
+          videoCallUrl: null,
+        });
+
+        const iCalUID = expectICalUIDAsString(createdBooking.iCalUID);
+
+        expectSuccessfulBookingCreationEmails({
+          booking: {
+            uid: createdBooking.uid!,
+          },
+          booker,
+          organizer,
+          emails,
+          iCalUID,
+        });
+
+        expectBookingCreatedWebhookToHaveBeenFired({
+          booker,
+          organizer,
+          location: BookingLocations.GoogleMeet,
+          subscriberUrl: "http://my-webhook.example.com",
+          videoCallUrl: "https://GOOGLE_MEET_URL_IN_CALENDAR_EVENT",
+        });
+      },
+      timeout
+    );
+
+    test(
       `should create a successful booking using the office365 delegation credential with Cal Video as the location
       1. Should create a booking in the database with reference having Delegation credential
       2. Should create an event in Outlook calendar with Delegation credential
 `,
       async ({ emails }) => {
-        const handleNewBooking = (await import("@calcom/features/bookings/lib/handleNewBooking")).default;
+        const handleNewBooking = getNewBookingHandler();
 
         const org = await createOrganization({
           name: "Test Org",
@@ -327,7 +606,7 @@ describe("handleNewBooking", () => {
         });
 
         // Mock a Scenario where iCalUID isn't returned by Google Calendar in which case booking UID is used as the ics UID
-        const calendarMock = mockCalendarToHaveNoBusySlots("office365calendar", {
+        const calendarMock = await mockCalendarToHaveNoBusySlots("office365calendar", {
           create: {
             id: "OFFICE_365_CALENDAR_EVENT_ID",
             uid: "MOCK_ID",
@@ -350,12 +629,9 @@ describe("handleNewBooking", () => {
           },
         });
 
-        const { req } = createMockNextJsRequest({
-          method: "POST",
-          body: mockBookingData,
+        const createdBooking = await handleNewBooking({
+          bookingData: mockBookingData,
         });
-
-        const createdBooking = await handleNewBooking(req);
 
         expect(createdBooking.responses).toEqual(
           expect.objectContaining({
@@ -391,7 +667,6 @@ describe("handleNewBooking", () => {
               uid: "OFFICE_365_CALENDAR_EVENT_ID",
               meetingId: "OFFICE_365_CALENDAR_EVENT_ID",
               meetingPassword: "MOCK_PASSWORD",
-              meetingUrl: "https://UNUSED_URL",
               // Verify Delegation credential was used
               delegationCredentialId: delegationCredential.id,
             },
@@ -436,7 +711,7 @@ describe("handleNewBooking", () => {
     test(
       `should fail calendar event creation when organizer isn't part of the organization of DelegationCredential Credential`,
       async () => {
-        const handleNewBooking = (await import("@calcom/features/bookings/lib/handleNewBooking")).default;
+        const handleNewBooking = getNewBookingHandler();
 
         const org = await createOrganization({
           name: "Test Org",
@@ -529,7 +804,7 @@ describe("handleNewBooking", () => {
         });
 
         // Mock a Scenario where iCalUID isn't returned by Google Calendar in which case booking UID is used as the ics UID
-        const calendarMock = mockCalendarToHaveNoBusySlots("googlecalendar", {
+        const calendarMock = await mockCalendarToHaveNoBusySlots("googlecalendar", {
           create: {
             id: "GOOGLE_CALENDAR_EVENT_ID",
             uid: "MOCK_ID",
@@ -552,12 +827,9 @@ describe("handleNewBooking", () => {
           },
         });
 
-        const { req } = createMockNextJsRequest({
-          method: "POST",
-          body: mockBookingData,
+        const createdBooking = await handleNewBooking({
+          bookingData: mockBookingData,
         });
-
-        const createdBooking = await handleNewBooking(req);
 
         expect(createdBooking.responses).toEqual(
           expect.objectContaining({
@@ -608,7 +880,7 @@ describe("handleNewBooking", () => {
       3. Should use Google Meet as the location even when not explicitly set.
 `,
       async () => {
-        const handleNewBooking = (await import("@calcom/features/bookings/lib/handleNewBooking")).default;
+        const handleNewBooking = getNewBookingHandler();
 
         const org = await createOrganization({
           name: "Test Org",
@@ -688,7 +960,7 @@ describe("handleNewBooking", () => {
         );
 
         // Mock a Scenario where iCalUID isn't returned by Google Calendar in which case booking UID is used as the ics UID
-        const calendarMock = mockCalendarToHaveNoBusySlots("googlecalendar", {
+        const calendarMock = await mockCalendarToHaveNoBusySlots("googlecalendar", {
           create: {
             id: "GOOGLE_CALENDAR_EVENT_ID",
             uid: "MOCK_ID",
@@ -718,12 +990,9 @@ describe("handleNewBooking", () => {
           },
         });
 
-        const { req } = createMockNextJsRequest({
-          method: "POST",
-          body: mockBookingData,
+        const createdBooking = await handleNewBooking({
+          bookingData: mockBookingData,
         });
-
-        const createdBooking = await handleNewBooking(req);
 
         expect(createdBooking.responses).toEqual(
           expect.objectContaining({
@@ -753,6 +1022,141 @@ describe("handleNewBooking", () => {
               meetingUrl: "https://GOOGLE_MEET_URL_IN_CALENDAR_EVENT",
               // Verify Delegation credential was used
               delegationCredentialId: delegationCredential.id,
+            },
+          ],
+          iCalUID: createdBooking.iCalUID,
+        });
+      },
+      timeout
+    );
+
+    test(
+      `should use Cal Video as the location if that is the default conferencing app set by the user. It must not use Google Meet coming from Delegation credential.`,
+      async () => {
+        const handleNewBooking = getNewBookingHandler();
+
+        const org = await createOrganization({
+          name: "Test Org",
+          slug: "testorg",
+        });
+
+        const payloadToMakePartOfOrganization = [
+          {
+            membership: {
+              accepted: true,
+              role: MembershipRole.ADMIN,
+            },
+            team: {
+              id: org.id,
+              name: "Test Org",
+              slug: "testorg",
+            },
+          },
+        ];
+
+        const booker = getBooker({
+          email: "booker@example.com",
+          name: "Booker",
+        });
+
+        const groupUser1 = getOrganizer({
+          name: "group-user-1",
+          username: "group-user-1",
+          email: "group-user-1@example.com",
+          id: 101,
+          schedules: [TestData.schedules.IstWorkHours],
+          selectedCalendars: [TestData.selectedCalendars.google],
+          teams: payloadToMakePartOfOrganization,
+          credentials: [],
+          destinationCalendar: TestData.selectedCalendars.google,
+          metadata: {
+            defaultConferencingApp: {
+              appSlug: "daily-video",
+            },
+          },
+        });
+
+        const groupUser2 = getOrganizer({
+          name: "group-user-2",
+          username: "group-user-2",
+          email: "group-user-2@example.com",
+          id: 102,
+          schedules: [TestData.schedules.IstWorkHours],
+          selectedCalendars: [TestData.selectedCalendars.google],
+          teams: payloadToMakePartOfOrganization,
+          credentials: [],
+          destinationCalendar: TestData.selectedCalendars.google,
+          metadata: {
+            defaultConferencingApp: {
+              appSlug: "daily-video",
+            },
+          },
+        });
+
+        await createDelegationCredential(org.id);
+
+        await createBookingScenario(
+          getScenarioData({
+            eventTypes: [],
+            users: [groupUser1, groupUser2],
+            apps: [TestData.apps["daily-video"], TestData.apps["google-calendar"]],
+          })
+        );
+
+        mockSuccessfulVideoMeetingCreation({
+          metadataLookupKey: "dailyvideo",
+          videoMeetingData: {
+            id: "MOCK_ID",
+            password: "MOCK_PASS",
+            url: `http://mock-dailyvideo.example.com/meeting-1`,
+          },
+        });
+
+        // Mock a Scenario where iCalUID isn't returned by Google Calendar in which case booking UID is used as the ics UID
+        mockCalendarToHaveNoBusySlots("googlecalendar", {
+          create: {
+            id: "GOOGLE_CALENDAR_EVENT_ID",
+            uid: "MOCK_ID",
+            appSpecificData: {
+              googleCalendar: {
+                hangoutLink: "https://GOOGLE_MEET_URL_IN_CALENDAR_EVENT",
+              },
+            },
+          },
+        });
+
+        const { dateString: plus1DateString } = getDate({ dateIncrement: 1 });
+
+        const mockBookingData = getMockRequestDataForDynamicGroupBooking({
+          data: {
+            start: `${plus1DateString}T05:00:00.000Z`,
+            end: `${plus1DateString}T05:30:00.000Z`,
+            eventTypeId: 0,
+            eventTypeSlug: "group-user-1+group-user-2",
+            user: "group-user-1+group-user-2",
+            responses: {
+              email: booker.email,
+              name: booker.name,
+              // location: { optionValue: "", value: BookingLocations.CalVideo },
+            },
+          },
+        });
+
+        const createdBooking = await handleNewBooking({
+          bookingData: mockBookingData,
+        });
+
+        await expectBookingToBeInDatabase({
+          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+          uid: createdBooking.uid!,
+          eventTypeId: null,
+          status: BookingStatus.ACCEPTED,
+          location: BookingLocations.CalVideo,
+          references: [
+            {
+              type: appStoreMetadata.dailyvideo.type,
+              // Verify Delegation credential was not used
+              delegationCredentialId: null,
             },
           ],
           iCalUID: createdBooking.iCalUID,

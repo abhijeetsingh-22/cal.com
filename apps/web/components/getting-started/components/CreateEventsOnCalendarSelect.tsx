@@ -1,17 +1,17 @@
-import DestinationCalendarSelector from "@calcom/features/calendars/DestinationCalendarSelector";
+import DestinationCalendarSelector from "@calcom/features/calendars/components/DestinationCalendarSelector";
 import { useLocale } from "@calcom/lib/hooks/useLocale";
 import type { RouterInputs } from "@calcom/trpc/react";
 import { trpc } from "@calcom/trpc/react";
 
 interface ICreateEventsOnCalendarSelectProps {
-  calendar?: RouterInputs["viewer"]["setDestinationCalendar"] | null;
+  calendar?: RouterInputs["viewer"]["calendars"]["setDestinationCalendar"] | null;
 }
 
 const CreateEventsOnCalendarSelect = (props: ICreateEventsOnCalendarSelectProps) => {
   const { calendar } = props;
   const { t } = useLocale();
-  const mutation = trpc.viewer.setDestinationCalendar.useMutation();
-  const connectedCalendarsQuery = trpc.viewer.connectedCalendars.useQuery();
+  const mutation = trpc.viewer.calendars.setDestinationCalendar.useMutation();
+  const connectedCalendarsQuery = trpc.viewer.calendars.connectedCalendars.useQuery();
 
   return (
     <>

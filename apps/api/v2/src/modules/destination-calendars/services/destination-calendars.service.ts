@@ -1,4 +1,5 @@
 import { ConnectedCalendar, Calendar } from "@/ee/calendars/outputs/connected-calendars.output";
+import { CalendarsCacheService } from "@/ee/calendars/services/calendars-cache.service";
 import { CalendarsService } from "@/ee/calendars/services/calendars.service";
 import { DestinationCalendarsRepository } from "@/modules/destination-calendars/destination-calendars.repository";
 import { Injectable, NotFoundException } from "@nestjs/common";
@@ -7,6 +8,7 @@ import { Injectable, NotFoundException } from "@nestjs/common";
 export class DestinationCalendarsService {
   constructor(
     private readonly calendarsService: CalendarsService,
+    private readonly calendarsCacheService: CalendarsCacheService,
     private readonly destinationCalendarsRepository: DestinationCalendarsRepository
   ) {}
 
@@ -16,8 +18,6 @@ export class DestinationCalendarsService {
     userId: number,
     delegationCredentialId?: string
   ) {
-    // note(Lauris): todo remove the log but leaving this now to confirm delegationCredentialId is received
-    console.log("debug: delegationCredentialId", delegationCredentialId);
     const userCalendars = await this.calendarsService.getCalendars(userId);
     const allCalendars: Calendar[] = userCalendars.connectedCalendars
       .map((cal: ConnectedCalendar) => cal.calendars ?? [])
@@ -62,6 +62,7 @@ export class DestinationCalendarsService {
       delegatedCalendar ? delegationCredentialId : undefined
     );
 
+    this.calendarsCacheService.deleteConnectedAndDestinationCalendarsCache(userId);
     return {
       userId: updatedCalendarUserId,
       integration: updatedCalendarIntegration,

@@ -1,12 +1,10 @@
-import type { Prisma } from "@prisma/client";
-
+import { EventTypeRepository } from "@calcom/features/eventtypes/repositories/eventTypeRepository";
 import { hasFilter } from "@calcom/features/filters/lib/hasFilter";
 import { checkRateLimitAndThrowError } from "@calcom/lib/checkRateLimitAndThrowError";
 import logger from "@calcom/lib/logger";
-import { EventTypeRepository } from "@calcom/lib/server/repository/eventType";
-import { prisma } from "@calcom/prisma";
 import type { PrismaClient } from "@calcom/prisma";
-
+import { prisma } from "@calcom/prisma";
+import type { Prisma } from "@calcom/prisma/client";
 import type { TrpcSessionUser } from "../../../types";
 import type { TGetEventTypesFromGroupSchema } from "./getByViewer.schema";
 import { mapEventType } from "./util";
@@ -21,14 +19,15 @@ type GetByViewerOptions = {
   input: TGetEventTypesFromGroupSchema;
 };
 
-type EventType = Awaited<ReturnType<typeof EventTypeRepository.findAllByUpId>>[number];
+type EventType = Awaited<ReturnType<EventTypeRepository["findAllByUpId"]>>[number];
 type MappedEventType = Awaited<ReturnType<typeof mapEventType>>;
+type MappedEventTypeWithHostFlag = MappedEventType & { isCurrentUserHost: boolean };
 
 export const getEventTypesFromGroup = async ({
   ctx,
   input,
 }: GetByViewerOptions): Promise<{
-  eventTypes: MappedEventType[];
+  eventTypes: MappedEventTypeWithHostFlag[];
   nextCursor: number | null | undefined;
 }> => {
   await checkRateLimitAndThrowError({
@@ -47,6 +46,7 @@ export const getEventTypesFromGroup = async ({
     !isFilterSet || isUpIdInFilter || (isFilterSet && filters?.upIds && !isUpIdInFilter);
 
   const eventTypes: EventType[] = [];
+  const eventTypeRepo = new EventTypeRepository(ctx.prisma);
 
   if (shouldListUserEvents || !teamId) {
     const baseQueryConditions = {
@@ -56,7 +56,7 @@ export const getEventTypesFromGroup = async ({
     };
 
     const [nonChildEventTypes, childEventTypes] = await Promise.all([
-      EventTypeRepository.findAllByUpId(
+      eventTypeRepo.findAllByUpId(
         {
           upId: userProfile.upId,
           userId: ctx.user.id,
@@ -78,7 +78,7 @@ export const getEventTypesFromGroup = async ({
           cursor,
         }
       ),
-      EventTypeRepository.findAllByUpId(
+      eventTypeRepo.findAllByUpId(
         {
           upId: userProfile.upId,
           userId: ctx.user.id,
@@ -117,7 +117,7 @@ export const getEventTypesFromGroup = async ({
 
   if (teamId) {
     const teamEventTypes =
-      (await EventTypeRepository.findTeamEventTypes({
+      (await eventTypeRepo.findTeamEventTypes({
         teamId,
         parentId,
         userId: ctx.user.id,
@@ -144,13 +144,30 @@ export const getEventTypesFromGroup = async ({
     eventTypes.push(...teamEventTypes);
   }
 
-  let nextCursor: number | null | undefined = undefined;
+  let nextCursor: number | null | undefined;
   if (eventTypes.length > limit) {
     const nextItem = eventTypes.pop();
     nextCursor = nextItem?.id;
   }
 
   const mappedEventTypes: MappedEventType[] = await Promise.all(eventTypes.map(mapEventType));
+
+  const eventTypeIds = mappedEventTypes.map((et) => et.id);
+  const userHostEntries = await prisma.host.findMany({
+    where: {
+      userId: ctx.user.id,
+      eventTypeId: { in: eventTypeIds },
+    },
+    select: {
+      eventTypeId: true,
+    },
+  });
+  const eventTypeIdsWhereUserIsHost = new Set(userHostEntries.map((h) => h.eventTypeId));
+
+  const eventTypesWithHostFlag = mappedEventTypes.map((eventType) => ({
+    ...eventType,
+    isCurrentUserHost: eventTypeIdsWhereUserIsHost.has(eventType.id),
+  }));
 
   const membership = await prisma.membership.findFirst({
     where: {
@@ -169,11 +186,11 @@ export const getEventTypesFromGroup = async ({
   });
 
   if (membership && membership.team.isPrivate)
-    mappedEventTypes.forEach((evType) => {
+    eventTypesWithHostFlag.forEach((evType) => {
       evType.users = [];
       evType.hosts = [];
       evType.children = [];
     });
 
-  return { eventTypes: mappedEventTypes, nextCursor: nextCursor ?? undefined };
+  return { eventTypes: eventTypesWithHostFlag, nextCursor: nextCursor ?? undefined };
 };

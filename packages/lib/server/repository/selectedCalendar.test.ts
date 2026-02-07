@@ -1,14 +1,65 @@
-import prismock from "../../../../tests/libs/__mocks__/prisma";
+import prismock from "@calcom/testing/lib/__mocks__/prisma";
 
 import { describe, expect, it, beforeEach } from "vitest";
 
+import type { FeatureId } from "@calcom/features/flags/config";
+import { FeaturesRepository } from "@calcom/features/flags/features.repository";
 import prisma from "@calcom/prisma";
+import { MembershipRole } from "@calcom/prisma/enums";
 
 import { SelectedCalendarRepository } from "./selectedCalendar";
 
 describe("SelectedCalendarRepository", () => {
   beforeEach(() => {
     prismock.selectedCalendar.deleteMany();
+  });
+
+  describe("getNextBatchToWatch", () => {
+    it("excludes calendars when calendar-cache feature is disabled on a team", async () => {
+      const user = await prisma.user.create({
+        data: {
+          email: "calendar-cache-disabled@example.com",
+          username: "calendar-cache-disabled",
+        },
+      });
+
+      const team = await prisma.team.create({
+        data: {
+          name: "Calendar Cache Disabled Team",
+          slug: "calendar-cache-disabled-team",
+        },
+      });
+
+      await prisma.membership.create({
+        data: {
+          userId: user.id,
+          teamId: team.id,
+          role: MembershipRole.ADMIN,
+          accepted: true,
+        },
+      });
+
+      const featuresRepository = new FeaturesRepository(prismock);
+      await featuresRepository.setTeamFeatureState({
+        teamId: team.id,
+        featureId: "calendar-cache" as FeatureId,
+        state: "disabled",
+        assignedBy: "test",
+      });
+
+      await prisma.selectedCalendar.create({
+        data: {
+          userId: user.id,
+          integration: "google_calendar",
+          externalId: "disabled@example.com",
+          credentialId: 1,
+        },
+      });
+
+      const nextBatch = await SelectedCalendarRepository.getNextBatchToWatch();
+
+      expect(nextBatch).toEqual([]);
+    });
   });
 
   describe("create", () => {
@@ -350,12 +401,13 @@ describe("SelectedCalendarRepository", () => {
             credentialId: 2,
             delegationCredentialId: "delegationCredential-123",
           };
+          const beforeDelegationCredentialId = data.delegationCredentialId;
 
           const result = await SelectedCalendarRepository.upsert(data);
           expect(result.id).not.toBe(null);
           expect(result.id).toBe(existingCalendar.id);
           expect(result.credentialId).toBe(data.credentialId);
-          expect(result.delegationCredentialId).toBeNull();
+          expect(result.delegationCredentialId).toBe(beforeDelegationCredentialId);
         });
       });
 
@@ -398,6 +450,7 @@ describe("SelectedCalendarRepository", () => {
           credentialId: 1,
         };
 
+        const beforeDelegationCredentialId = initialData.delegationCredentialId;
         const existingCalendar = await SelectedCalendarRepository.create(initialData);
 
         const data = {
@@ -410,7 +463,7 @@ describe("SelectedCalendarRepository", () => {
         const result = await SelectedCalendarRepository.upsert(data);
         expect(result.id).toBe(existingCalendar.id);
         expect(result.credentialId).toBe(existingCalendar.credentialId);
-        expect(result.delegationCredentialId).toBe(null);
+        expect(result.delegationCredentialId).toBe(beforeDelegationCredentialId);
       });
 
       it("shouldnt update delegationCredentialId if it is undefined", async () => {

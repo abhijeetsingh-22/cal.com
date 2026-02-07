@@ -4,26 +4,20 @@ import { signOut, useSession } from "next-auth/react";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 
-import { identityProviderNameMap } from "@calcom/features/auth/lib/identityProviderNameMap";
 import SectionBottomActions from "@calcom/features/settings/SectionBottomActions";
 import { useLocale } from "@calcom/lib/hooks/useLocale";
 import { IdentityProvider } from "@calcom/prisma/enums";
 import { userMetadata as userMetadataSchema } from "@calcom/prisma/zod-utils";
 import type { RouterOutputs } from "@calcom/trpc/react";
 import { trpc } from "@calcom/trpc/react";
+import classNames from "@calcom/ui/classNames";
+import { Alert } from "@calcom/ui/components/alert";
+import { Button } from "@calcom/ui/components/button";
 import { Form } from "@calcom/ui/components/form";
 import { PasswordField } from "@calcom/ui/components/form";
 import { Select } from "@calcom/ui/components/form";
 import { SettingsToggle } from "@calcom/ui/components/form";
-import { Alert } from "@calcom/ui/components/alert";
-import { Button } from "@calcom/ui/components/button";
-import classNames from "@calcom/ui/classNames";
-import {
-  SkeletonButton,
-  SkeletonContainer,
-  SkeletonText,
-  SkeletonAvatar,
-} from "@calcom/ui/components/skeleton";
+import { SkeletonButton, SkeletonContainer, SkeletonText } from "@calcom/ui/components/skeleton";
 import { showToast } from "@calcom/ui/components/toast";
 
 type ChangePasswordSessionFormValues = {
@@ -40,7 +34,7 @@ interface PasswordViewProps {
 const SkeletonLoader = () => {
   return (
     <SkeletonContainer>
-      <div className="border-subtle space-y-6 border-x px-4 py-8 sm:px-6">
+      <div className="border-subtle stack-y-6 border-x px-4 py-8 sm:px-6">
         <SkeletonText className="h-8 w-full" />
         <SkeletonText className="h-8 w-full" />
         <SkeletonText className="h-8 w-full" />
@@ -63,7 +57,7 @@ const PasswordView = ({ user }: PasswordViewProps) => {
 
   const [sessionTimeout, setSessionTimeout] = useState<number | undefined>(initialSessionTimeout);
 
-  const sessionMutation = trpc.viewer.updateProfile.useMutation({
+  const sessionMutation = trpc.viewer.me.updateProfile.useMutation({
     onSuccess: (data) => {
       showToast(t("session_timeout_changed"), "success");
       formMethods.reset(formMethods.getValues());
@@ -175,13 +169,13 @@ const PasswordView = ({ user }: PasswordViewProps) => {
           <div className="px-4 py-6 sm:px-6">
             <h2 className="font-cal text-emphasis text-lg font-medium leading-6">
               {t("account_managed_by_identity_provider", {
-                provider: identityProviderNameMap[user.identityProvider],
+                provider: IdentityProvider[user.identityProvider],
               })}
             </h2>
 
             <p className="text-subtle mt-1 text-sm">
               {t("account_managed_by_identity_provider_description", {
-                provider: identityProviderNameMap[user.identityProvider],
+                provider: IdentityProvider[user.identityProvider],
               })}
             </p>
             <Button
@@ -271,7 +265,7 @@ const PasswordView = ({ user }: PasswordViewProps) => {
                           : timeoutOptions[1]
                       }
                       isSearchable={false}
-                      className="block h-[36px] !w-auto min-w-0 flex-none rounded-md text-sm"
+                      className="block h-[36px] w-auto! min-w-0 flex-none rounded-md text-sm"
                       onChange={(event) => {
                         setSessionTimeout(event?.value);
                       }}

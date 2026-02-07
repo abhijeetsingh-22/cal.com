@@ -1,19 +1,10 @@
-import { bootstrap } from "@/app";
-import { AppModule } from "@/app.module";
-import { SchedulesModule_2024_06_11 } from "@/ee/schedules/schedules_2024_06_11/schedules.module";
-import { SchedulesService_2024_06_11 } from "@/ee/schedules/schedules_2024_06_11/services/schedules.service";
-import { PermissionsGuard } from "@/modules/auth/guards/permissions/permissions.guard";
-import { PrismaModule } from "@/modules/prisma/prisma.module";
-import { expectedSlotsUTC } from "@/modules/slots/slots-2024-09-04/controllers/e2e/expected-slots";
-import { GetSlotsOutput_2024_09_04 } from "@/modules/slots/slots-2024-09-04/outputs/get-slots.output";
-import { SlotsModule_2024_09_04 } from "@/modules/slots/slots-2024-09-04/slots.module";
-import { TokensModule } from "@/modules/tokens/tokens.module";
-import { UsersModule } from "@/modules/users/users.module";
+import { CAL_API_VERSION_HEADER, SUCCESS_STATUS, VERSION_2024_09_04 } from "@calcom/platform-constants";
+import type { CreateScheduleInput_2024_06_11 } from "@calcom/platform-types";
+import type { Team, User } from "@calcom/prisma/client";
 import { INestApplication } from "@nestjs/common";
 import { NestExpressApplication } from "@nestjs/platform-express";
 import { Test } from "@nestjs/testing";
-import { User } from "@prisma/client";
-import * as request from "supertest";
+import request from "supertest";
 import { BookingsRepositoryFixture } from "test/fixtures/repository/bookings.repository.fixture";
 import { EventTypesRepositoryFixture } from "test/fixtures/repository/event-types.repository.fixture";
 import { MembershipRepositoryFixture } from "test/fixtures/repository/membership.repository.fixture";
@@ -23,10 +14,17 @@ import { TeamRepositoryFixture } from "test/fixtures/repository/team.repository.
 import { UserRepositoryFixture } from "test/fixtures/repository/users.repository.fixture";
 import { randomString } from "test/utils/randomString";
 import { withApiAuth } from "test/utils/withApiAuth";
-
-import { CAL_API_VERSION_HEADER, SUCCESS_STATUS, VERSION_2024_09_04 } from "@calcom/platform-constants";
-import { CreateScheduleInput_2024_06_11 } from "@calcom/platform-types";
-import { Team } from "@calcom/prisma/client";
+import { AppModule } from "@/app.module";
+import { bootstrap } from "@/bootstrap";
+import { SchedulesModule_2024_06_11 } from "@/ee/schedules/schedules_2024_06_11/schedules.module";
+import { SchedulesService_2024_06_11 } from "@/ee/schedules/schedules_2024_06_11/services/schedules.service";
+import { PermissionsGuard } from "@/modules/auth/guards/permissions/permissions.guard";
+import { PrismaModule } from "@/modules/prisma/prisma.module";
+import { expectedSlotsUTC } from "@/modules/slots/slots-2024-09-04/controllers/e2e/expected-slots";
+import { GetSlotsOutput_2024_09_04 } from "@/modules/slots/slots-2024-09-04/outputs/get-slots.output";
+import { SlotsModule_2024_09_04 } from "@/modules/slots/slots-2024-09-04/slots.module";
+import { TokensModule } from "@/modules/tokens/tokens.module";
+import { UsersModule } from "@/modules/users/users.module";
 
 describe("Slots 2024-09-04 Endpoints", () => {
   describe("Organization team event type slots", () => {
@@ -49,11 +47,14 @@ describe("Slots 2024-09-04 Endpoints", () => {
 
     const nonOrgUserEmailOne = `slots-2024-09-04-non-org-user-one-${randomString()}@api.com`;
 
+    const orgSlug = `slots-2024-09-04-organization-${randomString()}`;
     let organization: Team;
+    const teamSlug = `slots-2024-09-04-organization-team-${randomString()}`;
     let team: Team;
     let orgUserOne: User;
     let orgUserTwo: User;
     let collectiveEventTypeId: number;
+    let collectiveEventTypeSlug: string;
     let roundRobinEventTypeId: number;
     let collectiveBookingId: number;
     let roundRobinBookingId: number;
@@ -91,7 +92,6 @@ describe("Slots 2024-09-04 Endpoints", () => {
       membershipsRepositoryFixture = new MembershipRepositoryFixture(moduleRef);
       bookingsRepositoryFixture = new BookingsRepositoryFixture(moduleRef);
 
-      const orgSlug = `slots-2024-09-04-organization-${randomString()}`;
       organization = await organizationsRepositoryFixture.create({
         name: orgSlug,
         isOrganization: true,
@@ -143,7 +143,8 @@ describe("Slots 2024-09-04 Endpoints", () => {
       });
 
       team = await teamRepositoryFixture.create({
-        name: `slots-2024-09-04-team-${randomString()}`,
+        name: teamSlug,
+        slug: teamSlug,
         isOrganization: false,
         parent: { connect: { id: organization.id } },
       });
@@ -178,6 +179,7 @@ describe("Slots 2024-09-04 Endpoints", () => {
         },
       });
       collectiveEventTypeId = collectiveEventType.id;
+      collectiveEventTypeSlug = collectiveEventType.slug;
 
       const roundRobinEventType = await eventTypesRepositoryFixture.createTeamEventType({
         schedulingType: "ROUND_ROBIN",
@@ -280,6 +282,34 @@ describe("Slots 2024-09-04 Endpoints", () => {
           expect(days.length).toEqual(5);
           expect(slots).toEqual(expectedSlotsUTC);
         });
+    });
+
+    it("should get collective team event slots in UTC using teamSlug, eventTypeSlug and organizationSlug", async () => {
+      return request(app.getHttpServer())
+        .get(
+          `/v2/slots?organizationSlug=${orgSlug}&teamSlug=${teamSlug}&eventTypeSlug=${collectiveEventTypeSlug}&start=2050-09-05&end=2050-09-09`
+        )
+        .set(CAL_API_VERSION_HEADER, VERSION_2024_09_04)
+        .expect(200)
+        .then(async (response) => {
+          const responseBody: GetSlotsOutput_2024_09_04 = response.body;
+          expect(responseBody.status).toEqual(SUCCESS_STATUS);
+          const slots = responseBody.data;
+
+          expect(slots).toBeDefined();
+          const days = Object.keys(slots);
+          expect(days.length).toEqual(5);
+          expect(slots).toEqual(expectedSlotsUTC);
+        });
+    });
+
+    it("should not get collective team event slots in UTC using teamSlug, eventTypeSlug if organizationSlug is missing", async () => {
+      return request(app.getHttpServer())
+        .get(
+          `/v2/slots?teamSlug=${teamSlug}&eventTypeSlug=${collectiveEventTypeSlug}&start=2050-09-05&end=2050-09-09`
+        )
+        .set(CAL_API_VERSION_HEADER, VERSION_2024_09_04)
+        .expect(404);
     });
 
     it("should get round robin team event slots in UTC", async () => {

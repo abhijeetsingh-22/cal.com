@@ -9,9 +9,7 @@ import getInstalledAppPath from "../../_utils/getInstalledAppPath";
 import createOAuthAppCredential from "../../_utils/oauth/createOAuthAppCredential";
 import { decodeOAuthState } from "../../_utils/oauth/decodeOAuthState";
 import appConfig from "../config.json";
-
-let consumer_key = "";
-let consumer_secret = "";
+import { getSalesforceTokenLifetime } from "../lib/getSalesforceTokenLifetime";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const { code } = req.query;
@@ -26,23 +24,36 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(401).json({ message: "You must be logged in to do this" });
   }
 
+  let consumerKey = "";
+  let consumerSecret = "";
   const appKeys = await getAppKeysFromSlug("salesforce");
-  if (typeof appKeys.consumer_key === "string") consumer_key = appKeys.consumer_key;
-  if (typeof appKeys.consumer_secret === "string") consumer_secret = appKeys.consumer_secret;
-  if (!consumer_key) return res.status(400).json({ message: "Salesforce consumer key missing." });
-  if (!consumer_secret) return res.status(400).json({ message: "Salesforce consumer secret missing." });
+  if (typeof appKeys.consumer_key === "string") consumerKey = appKeys.consumer_key;
+  if (typeof appKeys.consumer_secret === "string") consumerSecret = appKeys.consumer_secret;
+  if (!consumerKey) return res.status(400).json({ message: "Salesforce consumer key missing." });
+  if (!consumerSecret) return res.status(400).json({ message: "Salesforce consumer secret missing." });
 
   const conn = new jsforce.Connection({
     oauth2: {
-      clientId: consumer_key,
-      clientSecret: consumer_secret,
+      clientId: consumerKey,
+      clientSecret: consumerSecret,
       redirectUri: `${WEBAPP_URL_FOR_OAUTH}/api/integrations/salesforce/callback`,
     },
   });
 
   const salesforceTokenInfo = await conn.oauth2.requestToken(code as string);
 
-  await createOAuthAppCredential({ appId: appConfig.slug, type: appConfig.type }, salesforceTokenInfo, req);
+  // Get token lifetime via introspection
+  const tokenLifetime = await getSalesforceTokenLifetime({
+    accessToken: salesforceTokenInfo.access_token,
+    instanceUrl: salesforceTokenInfo.instance_url,
+  });
+
+  // Store token with token_lifetime
+  await createOAuthAppCredential(
+    { appId: appConfig.slug, type: appConfig.type },
+    { ...salesforceTokenInfo, token_lifetime: tokenLifetime },
+    req
+  );
 
   res.redirect(
     getSafeRedirectUrl(state?.returnTo) ?? getInstalledAppPath({ variant: "other", slug: "salesforce" })

@@ -54,6 +54,11 @@ const handler = async (req: NextApiRequest, res: NextApiResponse) => {
   }
 
   const [appName, apiEndpoint] = args;
+
+  if (apiEndpoint === "add" && !req.session?.user?.id) {
+    return res.status(401).json({ message: "You must be logged in to do this" });
+  }
+
   try {
     /* Absolute path didn't work */
     const handlerMap = (await import("@calcom/app-store/apps.server.generated")).apiHandlers;
@@ -71,8 +76,8 @@ const handler = async (req: NextApiRequest, res: NextApiResponse) => {
       const redirectUrl = handler.redirect?.url ?? undefined;
       res.json({ url: redirectUrl, newTab: handler.redirect?.newTab });
     }
-    if (!res.writableEnded) return res.status(200);
-    return res;
+    if (!res.writableEnded) res.status(200);
+    return;
   } catch (error) {
     console.error(error);
     if (error instanceof HttpError) {

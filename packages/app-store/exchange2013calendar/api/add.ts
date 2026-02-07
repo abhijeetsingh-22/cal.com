@@ -8,7 +8,7 @@ import { defaultResponder } from "@calcom/lib/server/defaultResponder";
 import prisma from "@calcom/prisma";
 
 import getInstalledAppPath from "../../_utils/getInstalledAppPath";
-import { CalendarService } from "../lib";
+import { BuildCalendarService } from "../lib";
 
 const bodySchema = z
   .object({
@@ -38,13 +38,15 @@ async function postHandler(req: NextApiRequest, res: NextApiResponse) {
     teamId: null,
     appId: "exchange2013-calendar",
     invalid: false,
+    delegationCredentialId: null,
   };
 
   try {
-    const dav = new CalendarService({
+    const dav = BuildCalendarService({
       id: 0,
       ...data,
       user: { email: user.email },
+      encryptedKey: null,
     });
     await dav?.listCalendars();
     await prisma.credential.create({

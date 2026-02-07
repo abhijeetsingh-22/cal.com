@@ -1,8 +1,12 @@
+import { PermissionCheckService } from "@calcom/features/pbac/services/permission-check.service";
 import {
   updateTriggerForExistingBookings,
   deleteWebhookScheduledTriggers,
+  cancelNoShowTasksForBooking,
 } from "@calcom/features/webhooks/lib/scheduleTrigger";
+import { validateUrlForSSRFSync } from "@calcom/lib/ssrfProtection";
 import { prisma } from "@calcom/prisma";
+import { MembershipRole } from "@calcom/prisma/enums";
 import type { TrpcSessionUser } from "@calcom/trpc/server/types";
 
 import { TRPCError } from "@trpc/server";
@@ -19,7 +23,7 @@ type EditOptions = {
 export const editHandler = async ({ input, ctx }: EditOptions) => {
   const { id, ...data } = input;
 
-  const webhook = await prisma.webhook.findFirst({
+  const webhook = await prisma.webhook.findUnique({
     where: {
       id,
     },
@@ -29,10 +33,38 @@ export const editHandler = async ({ input, ctx }: EditOptions) => {
     return null;
   }
 
+  // SSRF validation: only validate if URL is being changed
+  if (data.subscriberUrl && data.subscriberUrl !== webhook.subscriberUrl) {
+    const validation = validateUrlForSSRFSync(data.subscriberUrl);
+    if (!validation.isValid) {
+      throw new TRPCError({
+        code: "BAD_REQUEST",
+        message: `Webhook URL is not allowed: ${validation.error}`,
+      });
+    }
+  }
+
   if (webhook.platform) {
     const { user } = ctx;
     if (user?.role !== "ADMIN") {
       throw new TRPCError({ code: "UNAUTHORIZED" });
+    }
+  }
+
+  if (webhook.teamId) {
+    const permissionService = new PermissionCheckService();
+
+    const hasPermission = await permissionService.checkPermission({
+      userId: ctx.user.id,
+      teamId: webhook.teamId,
+      permission: "webhook.update",
+      fallbackRoles: [MembershipRole.ADMIN, MembershipRole.OWNER],
+    });
+
+    if (!hasPermission) {
+      throw new TRPCError({
+        code: "UNAUTHORIZED",
+      });
     }
   }
 
@@ -51,6 +83,14 @@ export const editHandler = async ({ input, ctx }: EditOptions) => {
     const activeTriggersBefore = webhook.active ? webhook.eventTriggers : [];
     await updateTriggerForExistingBookings(webhook, activeTriggersBefore, updatedWebhook.eventTriggers);
   } else if (!data.active && webhook.active) {
+    await cancelNoShowTasksForBooking({
+      webhook: {
+        id: webhook.id,
+        userId: webhook.userId,
+        teamId: webhook.teamId,
+        eventTypeId: webhook.eventTypeId,
+      },
+    });
     await deleteWebhookScheduledTriggers({ webhookId: webhook.id });
   }
 

@@ -1,73 +1,35 @@
-import { getPublicEvent } from "@calcom/features/eventtypes/lib/getPublicEvent";
-import getBulkEventTypes from "@calcom/lib/event-types/getBulkEventTypes";
+import EventManager from "@calcom/features/bookings/lib/EventManager";
 
-export { createHandler as createEventType } from "@calcom/trpc/server/routers/viewer/eventTypes/create.handler";
-export { updateHandler as updateEventType } from "@calcom/trpc/server/routers/viewer/eventTypes/update.handler";
+export { getPublicEvent, type PublicEventType } from "@calcom/features/eventtypes/lib/getPublicEvent";
 
-export type { TUpdateInputSchema as TUpdateEventTypeInputSchema } from "@calcom/trpc/server/routers/viewer/eventTypes/update.schema";
-export type { EventTypesPublic } from "@calcom/lib/event-types/getEventTypesPublic";
-export { getEventTypesPublic } from "@calcom/lib/event-types/getEventTypesPublic";
+export { getBulkUserEventTypes, getBulkTeamEventTypes } from "@calcom/app-store/_utils/getBulkEventTypes";
+
+export { createHandler as createEventType } from "@calcom/trpc/server/routers/viewer/eventTypes/heavy/create.handler";
+export { updateHandler as updateEventType } from "@calcom/trpc/server/routers/viewer/eventTypes/heavy/update.handler";
+
+export { listWithTeamHandler } from "@calcom/trpc/server/routers/viewer/eventTypes/listWithTeam.handler";
+
+export type { TUpdateInputSchema as TUpdateEventTypeInputSchema } from "@calcom/trpc/server/routers/viewer/eventTypes/heavy/update.schema";
+export type { EventTypesPublic } from "@calcom/features/eventtypes/lib/getEventTypesPublic";
+export { getEventTypesPublic } from "@calcom/features/eventtypes/lib/getEventTypesPublic";
 export { parseEventTypeColor } from "@calcom/lib/isEventTypeColor";
+
 export {
-  // note(Lauris): Api to internal
-  transformBookingFieldsApiToInternal,
-  transformLocationsApiToInternal,
-  transformTeamLocationsApiToInternal,
-  transformIntervalLimitsApiToInternal,
-  transformFutureBookingLimitsApiToInternal,
-  transformRecurrenceApiToInternal,
-  transformBookerLayoutsApiToInternal,
-  transformConfirmationPolicyApiToInternal,
-  transformEventColorsApiToInternal,
-  transformSeatsApiToInternal,
-  // note(Lauris): Internal to api
-  transformBookingFieldsInternalToApi,
-  transformLocationsInternalToApi,
-  transformIntervalLimitsInternalToApi,
-  transformFutureBookingLimitsInternalToApi,
-  transformRecurrenceInternalToApi,
-  transformBookerLayoutsInternalToApi,
-  transformRequiresConfirmationInternalToApi,
-  transformEventTypeColorsInternalToApi,
-  transformSeatsInternalToApi,
-  // note(Lauris): schemas
-  InternalLocationsSchema,
-  InternalLocationSchema,
-  BookingFieldsSchema,
-  BookingFieldSchema,
-  // note(Lauris): constants
-  systemBeforeFieldName,
-  systemBeforeFieldEmail,
-  systemBeforeFieldLocation,
-  systemAfterFieldRescheduleReason,
-  systemAfterFieldTitle,
-  systemAfterFieldNotes,
-  systemAfterFieldGuests,
-  apiToInternalintegrationsMapping,
-} from "@calcom/lib/event-types/transformers";
+  EventTypeMetaDataSchema,
+  eventTypeBookingFields,
+  eventTypeLocations,
+} from "@calcom/prisma/zod-utils";
 
-export type {
-  SystemField,
-  CustomField,
-  NameSystemField,
-  EmailSystemField,
-  InternalLocation,
-} from "@calcom/lib/event-types/transformers";
+export type { EventTypeMetadata } from "@calcom/prisma/zod-utils";
 
-export { EventTypeMetaDataSchema } from "@calcom/prisma/zod-utils";
+export { validateCustomEventName } from "@calcom/features/eventtypes/lib/eventNaming";
+export { EventManager };
+export { getEventTypeById } from "@calcom/features/eventtypes/lib/getEventTypeById";
+export { getEventTypesByViewer } from "@calcom/features/eventtypes/lib/getEventTypesByViewer";
+export type { EventType } from "@calcom/features/eventtypes/lib/getEventTypeById";
+export type { EventTypesByViewer } from "@calcom/features/eventtypes/lib/getEventTypesByViewer";
+export type { UpdateEventTypeReturn } from "@calcom/trpc/server/routers/viewer/eventTypes/heavy/update.handler";
+export { updateNewTeamMemberEventTypes } from "@calcom/features/ee/teams/lib/queries";
 
-export { validateCustomEventName } from "@calcom/lib/event";
-
-export { getEventTypeById } from "@calcom/lib/event-types/getEventTypeById";
-export { getEventTypesByViewer } from "@calcom/lib/event-types/getEventTypesByViewer";
-export type { EventType } from "@calcom/lib/event-types/getEventTypeById";
-export type { EventTypesByViewer } from "@calcom/lib/event-types/getEventTypesByViewer";
-export type { UpdateEventTypeReturn } from "@calcom/trpc/server/routers/viewer/eventTypes/update.handler";
-export { eventTypeBookingFields, eventTypeLocations } from "@calcom/prisma/zod-utils";
-export { updateNewTeamMemberEventTypes } from "@calcom/lib/server/queries";
-
-export { getBulkEventTypes };
-
-export type PublicEventType = Awaited<ReturnType<typeof getPublicEvent>>;
-export { bulkUpdateEventsToDefaultLocation } from "@calcom/lib/bulkUpdateEventsToDefaultLocation";
-export { getPublicEvent };
+export { bulkUpdateEventsToDefaultLocation } from "@calcom/app-store/_utils/bulkUpdateEventsToDefaultLocation";
+export { bulkUpdateTeamEventsToDefaultLocation } from "@calcom/app-store/_utils/bulkUpdateTeamEventsToDefaultLocation";

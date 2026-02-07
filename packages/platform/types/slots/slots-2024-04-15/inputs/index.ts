@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional, ApiHideProperty } from "@nestjs/swagger";
 import { Transform } from "class-transformer";
+import type { ValidationArguments, ValidatorConstraintInterface } from "class-validator";
 import {
   IsArray,
   IsBoolean,
@@ -10,19 +11,44 @@ import {
   IsString,
   Min,
   IsEnum,
+  ValidatorConstraint,
+  Validate,
 } from "class-validator";
 
 import { SlotFormat } from "@calcom/platform-enums";
 
+@ValidatorConstraint({ name: "routingFormResponseIdValidator", async: false })
+class RoutingFormResponseIdValidator implements ValidatorConstraintInterface {
+  validate(routingFormResponseId: number, args: ValidationArguments) {
+    if (routingFormResponseId === undefined) return true;
+
+    const payload = args.object as GetAvailableSlotsInput_2024_04_15;
+
+    if (payload._isDryRun) {
+      return routingFormResponseId === 0;
+    }
+
+    return routingFormResponseId >= 1;
+  }
+
+  defaultMessage(args: ValidationArguments) {
+    const payload = args.object as GetAvailableSlotsInput_2024_04_15;
+    if (payload._isDryRun) {
+      return "routingFormResponseId must be 0 for dry run";
+    }
+    return "routingFormResponseId must be a positive number";
+  }
+}
+
 export class GetAvailableSlotsInput_2024_04_15 {
-  @IsDateString()
+  @IsDateString({ strict: true })
   @ApiProperty({
     description: "Start date string starting from which to fetch slots in UTC timezone.",
     example: "2022-06-14T00:00:00.000Z",
   })
   startTime!: string;
 
-  @IsDateString()
+  @IsDateString({ strict: true })
   @ApiProperty({
     description: "End date string until which to fetch slots in UTC timezone.",
     example: "2022-06-14T23:59:59.999Z",
@@ -129,6 +155,77 @@ export class GetAvailableSlotsInput_2024_04_15 {
   @IsOptional()
   @ApiPropertyOptional()
   teamMemberEmail?: string;
+
+  @IsString()
+  @IsOptional()
+  @ApiPropertyOptional()
+  @ApiHideProperty()
+  embedConnectVersion?: string;
+
+  @IsString()
+  @IsOptional()
+  @ApiPropertyOptional()
+  @ApiHideProperty()
+  email?: string | null;
+
+  @Transform(({ value }: { value: string }) => value && parseInt(value))
+  @IsNumber()
+  @IsOptional()
+  @Validate(RoutingFormResponseIdValidator)
+  @ApiPropertyOptional()
+  @ApiHideProperty()
+  routingFormResponseId?: number;
+
+  @Transform(({ value }) => value && value.toLowerCase() === "true")
+  @IsBoolean()
+  @IsOptional()
+  @ApiHideProperty()
+  _isDryRun?: boolean;
+
+  @Transform(({ value }) => value && value.toLowerCase() === "true")
+  @IsBoolean()
+  @IsOptional()
+  @ApiHideProperty()
+  _bypassCalendarBusyTimes?: boolean;
+
+  @Transform(({ value }) => value && value.toLowerCase() === "true")
+  @IsBoolean()
+  @IsOptional()
+  @ApiHideProperty()
+  _silentCalendarFailures?: boolean;
+
+  @Transform(({ value }) => (value ? value.toLowerCase() === "true" : false))
+  @IsBoolean()
+  @IsOptional()
+  @ApiHideProperty()
+  isTeamEvent?: boolean;
+
+  @Transform(({ value }: { value: string }) => value && parseInt(value))
+  @IsNumber()
+  @IsOptional()
+  @ApiHideProperty()
+  teamId?: number;
+
+  @Transform(({ value }) => {
+    if (typeof value === "string") {
+      return value.split(",").map((id: string) => parseInt(id.trim(), 10));
+    }
+    if (Array.isArray(value)) {
+      return value.map((id) => (typeof id === "string" ? parseInt(id, 10) : id));
+    }
+    return value;
+  })
+  @IsArray()
+  @IsNumber({}, { each: true })
+  @IsOptional()
+  /* @ApiPropertyOptional({
+    type: [Number],
+    description:
+      "For round robin event types, filter available slots to only consider the specified subset of host user IDs. This allows you to get availability for specific hosts within a round robin event type.",
+    example: [1, 2, 3],
+  }) */
+  @ApiHideProperty()
+  rrHostSubsetIds?: number[];
 }
 
 export class RemoveSelectedSlotInput_2024_04_15 {

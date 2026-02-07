@@ -1,9 +1,7 @@
 import { ConnectedCalendarsData } from "@/ee/calendars/outputs/connected-calendars.output";
 import { CalendarsService } from "@/ee/calendars/services/calendars.service";
 import { EventTypesRepository_2024_06_14 } from "@/ee/event-types/event-types_2024_06_14/event-types.repository";
-import { UserWithProfile } from "@/modules/users/users.repository";
-import { Injectable, BadRequestException } from "@nestjs/common";
-
+import { InputEventTransformed_2024_06_14 } from "@/ee/event-types/event-types_2024_06_14/transformed";
 import {
   transformBookingFieldsApiToInternal,
   transformLocationsApiToInternal,
@@ -17,23 +15,32 @@ import {
   systemAfterFieldNotes,
   systemAfterFieldGuests,
   systemAfterFieldRescheduleReason,
-  EventTypeMetaDataSchema,
   transformBookerLayoutsApiToInternal,
   transformConfirmationPolicyApiToInternal,
   transformEventColorsApiToInternal,
-  validateCustomEventName,
   transformSeatsApiToInternal,
   SystemField,
   CustomField,
   InternalLocation,
   InternalLocationSchema,
+} from "@/ee/event-types/event-types_2024_06_14/transformers";
+import { UserWithProfile } from "@/modules/users/users.repository";
+import { Injectable, BadRequestException } from "@nestjs/common";
+
+import { slugifyLenient } from "@calcom/platform-libraries";
+import { getApps, getUsersCredentialsIncludeServiceAccountKey } from "@calcom/platform-libraries/app-store";
+import {
+  validateCustomEventName,
+  EventTypeMetaDataSchema,
+  EventTypeMetadata,
 } from "@calcom/platform-libraries/event-types";
 import {
   CreateEventTypeInput_2024_06_14,
   DestinationCalendar_2024_06_14,
-  InputEventTransformed_2024_06_14,
+  InputBookingField_2024_06_14,
   OutputUnknownLocation_2024_06_14,
   UpdateEventTypeInput_2024_06_14,
+  supportedIntegrations,
 } from "@calcom/platform-types";
 import { BookerLayouts } from "@calcom/prisma/zod-utils";
 
@@ -53,9 +60,10 @@ export class InputEventTypesService_2024_06_14 {
   ) {}
 
   async transformAndValidateCreateEventTypeInput(
-    userId: UserWithProfile["id"],
+    user: UserWithProfile,
     inputEventType: CreateEventTypeInput_2024_06_14
   ) {
+    await this.validateInputLocations(user, inputEventType.locations);
     const transformedBody = this.transformInputCreateEventType(inputEventType);
 
     await this.validateEventTypeInputs({
@@ -65,20 +73,24 @@ export class InputEventTypesService_2024_06_14 {
       eventName: transformedBody.eventName,
     });
 
-    transformedBody.destinationCalendar &&
-      (await this.validateInputDestinationCalendar(userId, transformedBody.destinationCalendar));
+    if (transformedBody.destinationCalendar) {
+      await this.validateInputDestinationCalendar(user.id, transformedBody.destinationCalendar);
+    }
 
-    transformedBody.useEventTypeDestinationCalendarEmail &&
-      (await this.validateInputUseDestinationCalendarEmail(userId));
+    if (transformedBody.useEventTypeDestinationCalendarEmail) {
+      await this.validateInputUseDestinationCalendarEmail(user.id);
+    }
 
     return transformedBody;
   }
 
   async transformAndValidateUpdateEventTypeInput(
     inputEventType: UpdateEventTypeInput_2024_06_14,
-    userId: UserWithProfile["id"],
+    user: UserWithProfile,
     eventTypeId: number
   ) {
+    await this.validateInputLocations(user, inputEventType.locations);
+
     const transformedBody = await this.transformInputUpdateEventType(inputEventType, eventTypeId);
 
     await this.validateEventTypeInputs({
@@ -89,23 +101,18 @@ export class InputEventTypesService_2024_06_14 {
       eventName: transformedBody.eventName,
     });
 
-    transformedBody.destinationCalendar &&
-      (await this.validateInputDestinationCalendar(userId, transformedBody.destinationCalendar));
+    if (transformedBody.destinationCalendar) {
+      await this.validateInputDestinationCalendar(user.id, transformedBody.destinationCalendar);
+    }
 
-    transformedBody.useEventTypeDestinationCalendarEmail &&
-      (await this.validateInputUseDestinationCalendarEmail(userId));
+    if (transformedBody.useEventTypeDestinationCalendarEmail) {
+      await this.validateInputUseDestinationCalendarEmail(user.id);
+    }
 
     return transformedBody;
   }
 
   transformInputCreateEventType(inputEventType: CreateEventTypeInput_2024_06_14) {
-    const defaultLocations: CreateEventTypeInput_2024_06_14["locations"] = [
-      {
-        type: "integration",
-        integration: "cal-video",
-      },
-    ];
-
     const {
       lengthInMinutes,
       lengthInMinutesOptions,
@@ -121,26 +128,52 @@ export class InputEventTypesService_2024_06_14 {
       seats,
       customName,
       useDestinationCalendarEmail,
+      disableGuests,
+      bookerActiveBookingsLimit,
+      slug,
+      disableRescheduling,
+      disableCancelling,
+      calVideoSettings,
       ...rest
     } = inputEventType;
     const confirmationPolicyTransformed = this.transformInputConfirmationPolicy(confirmationPolicy);
 
+    const locationsTransformed = locations?.length ? this.transformInputLocations(locations) : undefined;
+
+    const effectiveBookingFields =
+      disableGuests !== undefined
+        ? this.getBookingFieldsWithGuestsToggled(bookingFields, disableGuests)
+        : bookingFields;
+
+    const maxActiveBookingsPerBooker = bookerActiveBookingsLimit
+      ? this.transformInputBookerActiveBookingsLimit(bookerActiveBookingsLimit)
+      : {};
+
+    const slugifiedSlug = slugifyLenient(slug);
+
+    const metadata: EventTypeMetadata = {
+      bookerLayouts: this.transformInputBookerLayouts(bookerLayouts),
+      requiresConfirmationThreshold:
+        confirmationPolicyTransformed?.requiresConfirmationThreshold ?? undefined,
+      multipleDuration: lengthInMinutesOptions,
+    };
+
+    const disableReschedulingTransformed = this.transformInputDisableRescheduling(disableRescheduling);
+    const disableCancellingTransformed = this.transformInputDisableCancelling(disableCancelling);
+    const calVideoSettingsTransformed = this.transformInputCalVideoSettings(calVideoSettings);
+
     const eventType = {
       ...rest,
+      slug: slugifiedSlug,
       length: lengthInMinutes,
-      locations: this.transformInputLocations(locations || defaultLocations),
-      bookingFields: this.transformInputBookingFields(bookingFields),
+      locations: locationsTransformed,
+      bookingFields: this.transformInputBookingFields(effectiveBookingFields),
       bookingLimits: bookingLimitsCount ? this.transformInputIntervalLimits(bookingLimitsCount) : undefined,
       durationLimits: bookingLimitsDuration
         ? this.transformInputIntervalLimits(bookingLimitsDuration)
         : undefined,
       ...this.transformInputBookingWindow(bookingWindow),
-      metadata: {
-        bookerLayouts: this.transformInputBookerLayouts(bookerLayouts),
-        requiresConfirmationThreshold:
-          confirmationPolicyTransformed?.requiresConfirmationThreshold ?? undefined,
-        multipleDuration: lengthInMinutesOptions,
-      },
+      metadata,
       requiresConfirmation: confirmationPolicyTransformed?.requiresConfirmation ?? undefined,
       requiresConfirmationWillBlockSlot:
         confirmationPolicyTransformed?.requiresConfirmationWillBlockSlot ?? undefined,
@@ -149,9 +182,28 @@ export class InputEventTypesService_2024_06_14 {
       ...this.transformInputSeatOptions(seats),
       eventName: customName,
       useEventTypeDestinationCalendarEmail: useDestinationCalendarEmail,
+      ...maxActiveBookingsPerBooker,
+      ...disableReschedulingTransformed,
+      ...disableCancellingTransformed,
+      ...calVideoSettingsTransformed,
     };
 
     return eventType;
+  }
+
+  transformInputBookerActiveBookingsLimit(
+    bookerActiveBookingsLimit: CreateEventTypeInput_2024_06_14["bookerActiveBookingsLimit"]
+  ) {
+    if (!bookerActiveBookingsLimit || bookerActiveBookingsLimit.disabled) {
+      return {
+        maxActiveBookingsPerBooker: null,
+        maxActiveBookingPerBookerOfferReschedule: false,
+      };
+    }
+    return {
+      maxActiveBookingsPerBooker: bookerActiveBookingsLimit?.maximumActiveBookings,
+      maxActiveBookingPerBookerOfferReschedule: bookerActiveBookingsLimit?.offerReschedule,
+    };
   }
 
   async transformInputUpdateEventType(inputEventType: UpdateEventTypeInput_2024_06_14, eventTypeId: number) {
@@ -170,43 +222,104 @@ export class InputEventTypesService_2024_06_14 {
       seats,
       customName,
       useDestinationCalendarEmail,
+      disableGuests,
+      bookerActiveBookingsLimit,
+      slug,
+      disableRescheduling,
+      disableCancelling,
+      calVideoSettings,
       ...rest
     } = inputEventType;
     const eventTypeDb = await this.eventTypesRepository.getEventTypeWithMetaData(eventTypeId);
-    const metadataTransformed = !!eventTypeDb?.metadata
+    const metadataTransformed = eventTypeDb?.metadata
       ? EventTypeMetaDataSchema.parse(eventTypeDb.metadata)
       : {};
 
     const confirmationPolicyTransformed = this.transformInputConfirmationPolicy(confirmationPolicy);
 
+    const effectiveBookingFields =
+      disableGuests !== undefined
+        ? this.getBookingFieldsWithGuestsToggled(bookingFields, disableGuests)
+        : bookingFields;
+
+    const maxActiveBookingsPerBooker = bookerActiveBookingsLimit
+      ? this.transformInputBookerActiveBookingsLimit(bookerActiveBookingsLimit)
+      : {};
+
+    const metadata: EventTypeMetadata = {
+      ...metadataTransformed,
+      ...(bookerLayouts !== undefined
+        ? { bookerLayouts: this.transformInputBookerLayouts(bookerLayouts) }
+        : {}),
+      ...(confirmationPolicy !== undefined
+        ? {
+            requiresConfirmationThreshold:
+              confirmationPolicyTransformed?.requiresConfirmationThreshold ?? undefined,
+          }
+        : {}),
+      ...(lengthInMinutesOptions !== undefined ? { multipleDuration: lengthInMinutesOptions } : {}),
+    };
+
+    const disableReschedulingTransformed = disableRescheduling
+      ? this.transformInputDisableRescheduling(disableRescheduling)
+      : {};
+    const disableCancellingTransformed = disableCancelling
+      ? this.transformInputDisableCancelling(disableCancelling)
+      : {};
+    const calVideoSettingsTransformed = calVideoSettings
+      ? this.transformInputCalVideoSettings(calVideoSettings)
+      : {};
+
     const eventType = {
       ...rest,
+      ...(slug ? { slug: slugifyLenient(slug) } : {}),
       length: lengthInMinutes,
       locations: locations ? this.transformInputLocations(locations) : undefined,
-      bookingFields: bookingFields ? this.transformInputBookingFields(bookingFields) : undefined,
+      bookingFields: effectiveBookingFields
+        ? this.transformInputBookingFields(effectiveBookingFields)
+        : undefined,
       bookingLimits: bookingLimitsCount ? this.transformInputIntervalLimits(bookingLimitsCount) : undefined,
       durationLimits: bookingLimitsDuration
         ? this.transformInputIntervalLimits(bookingLimitsDuration)
         : undefined,
       ...this.transformInputBookingWindow(bookingWindow),
-      metadata: {
-        ...metadataTransformed,
-        bookerLayouts: this.transformInputBookerLayouts(bookerLayouts),
-        requiresConfirmationThreshold:
-          confirmationPolicyTransformed?.requiresConfirmationThreshold ?? undefined,
-        multipleDuration: lengthInMinutesOptions,
-      },
+      metadata,
       recurringEvent: recurrence ? this.transformInputRecurrignEvent(recurrence) : undefined,
       requiresConfirmation: confirmationPolicyTransformed?.requiresConfirmation ?? undefined,
       requiresConfirmationWillBlockSlot:
         confirmationPolicyTransformed?.requiresConfirmationWillBlockSlot ?? undefined,
       eventTypeColor: this.transformInputEventTypeColor(color),
-      ...this.transformInputSeatOptions(seats),
+      ...(seats ? this.transformInputSeatOptions(seats) : { seatsPerTimeSlot: undefined }),
       eventName: customName,
       useEventTypeDestinationCalendarEmail: useDestinationCalendarEmail,
+      ...maxActiveBookingsPerBooker,
+      ...disableReschedulingTransformed,
+      ...disableCancellingTransformed,
+      ...calVideoSettingsTransformed,
     };
 
     return eventType;
+  }
+
+  getBookingFieldsWithGuestsToggled(
+    bookingFields: InputBookingField_2024_06_14[] | undefined,
+    hideGuests: boolean
+  ) {
+    const toggledGuestsBookingField: InputBookingField_2024_06_14 = { slug: "guests", hidden: hideGuests };
+    if (!bookingFields) {
+      return [toggledGuestsBookingField];
+    }
+
+    const bookingFieldsCopy = [...bookingFields];
+
+    const guestsBookingField = bookingFieldsCopy.find((field) => "slug" in field && field.slug === "guests");
+    if (guestsBookingField) {
+      Object.assign(guestsBookingField, { hidden: hideGuests });
+      return bookingFieldsCopy;
+    }
+
+    bookingFieldsCopy.push(toggledGuestsBookingField);
+    return bookingFieldsCopy;
   }
 
   transformInputLocations(inputLocations: CreateEventTypeInput_2024_06_14["locations"]) {
@@ -223,6 +336,7 @@ export class InputEventTypesService_2024_06_14 {
     const systemCustomNameField = systemCustomFields?.find((field) => field.type === "name");
     const systemCustomEmailField = systemCustomFields?.find((field) => field.type === "email");
     const systemCustomTitleField = systemCustomFields?.find((field) => field.name === "title");
+    const systemCustomLocationField = systemCustomFields?.find((field) => field.name === "location");
     const systemCustomNotesField = systemCustomFields?.find((field) => field.name === "notes");
     const systemCustomGuestsField = systemCustomFields?.find((field) => field.name === "guests");
     const systemCustomRescheduleReasonField = systemCustomFields?.find(
@@ -232,7 +346,7 @@ export class InputEventTypesService_2024_06_14 {
     const defaultFieldsBefore: (SystemField | CustomField)[] = [
       systemCustomNameField || systemBeforeFieldName,
       systemCustomEmailField || systemBeforeFieldEmail,
-      systemBeforeFieldLocation,
+      systemCustomLocationField || systemBeforeFieldLocation,
     ];
 
     const defaultFieldsAfter = [
@@ -273,7 +387,8 @@ export class InputEventTypesService_2024_06_14 {
       field.name !== "title" &&
       field.name !== "notes" &&
       field.name !== "guests" &&
-      field.name !== "rescheduleReason"
+      field.name !== "rescheduleReason" &&
+      field.name !== "location"
     );
   }
 
@@ -283,7 +398,7 @@ export class InputEventTypesService_2024_06_14 {
 
   transformInputBookingWindow(inputBookingWindow: CreateEventTypeInput_2024_06_14["bookingWindow"]) {
     const res = transformFutureBookingLimitsApiToInternal(inputBookingWindow);
-    return !!res ? res : {};
+    return res ? res : {};
   }
 
   transformInputBookerLayouts(inputBookerLayouts: CreateEventTypeInput_2024_06_14["bookerLayouts"]) {
@@ -333,7 +448,7 @@ export class InputEventTypesService_2024_06_14 {
       requiresConfirmationDb = eventTypeDb?.requiresConfirmation ?? false;
     }
 
-    const seatsPerTimeSlotFinal = !!seatsPerTimeSlot ? seatsPerTimeSlot : seatsPerTimeSlotDb;
+    const seatsPerTimeSlotFinal = seatsPerTimeSlot ? seatsPerTimeSlot : seatsPerTimeSlotDb;
     const seatsEnabledFinal = !!seatsPerTimeSlotFinal && seatsPerTimeSlotFinal > 0;
 
     const locationsFinal = locations !== undefined ? locations : locationsDb;
@@ -358,6 +473,7 @@ export class InputEventTypesService_2024_06_14 {
       );
     }
   }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   transformLocations(locations: any) {
     if (!locations) return [];
 
@@ -447,5 +563,125 @@ export class InputEventTypesService_2024_06_14 {
     }
 
     return;
+  }
+
+  async validateInputLocations(
+    user: UserWithProfile,
+    inputLocations: CreateEventTypeInput_2024_06_14["locations"] | undefined
+  ) {
+    await Promise.all(
+      inputLocations?.map(async (location) => {
+        if (location.type === "integration") {
+          // cal-video is global, so we can skip this check
+          if (location.integration !== "cal-video") {
+            await this.checkAppIsValidAndConnected(user, location.integration);
+          }
+        }
+      }) ?? []
+    );
+  }
+
+  async checkAppIsValidAndConnected(user: UserWithProfile, appSlug: string) {
+    const conferencingApps = supportedIntegrations as readonly string[];
+    if (!conferencingApps.includes(appSlug)) {
+      throw new BadRequestException("Invalid app, available apps are: ", conferencingApps.join(", "));
+    }
+
+    // Map API integration names to actual app slugs
+    const slugMap: Record<string, string> = {
+      "office365-video": "msteams",
+      "facetime-video": "facetime",
+      "whereby-video": "whereby",
+      "whatsapp-video": "whatsapp",
+      "webex-video": "webex",
+      "telegram-video": "telegram",
+      "sylaps-video": "sylapsvideo",
+      "skype-video": "skype",
+      "sirius-video": "sirius_video",
+      "signal-video": "signal",
+      "shimmer-video": "shimmervideo",
+      "salesroom-video": "salesroom",
+      "roam-video": "roam",
+      "riverside-video": "riverside",
+      "ping-video": "ping",
+      "mirotalk-video": "mirotalk",
+      "jelly-video": "jelly",
+      "jelly-conferencing": "jelly",
+      "huddle": "huddle01",
+      "element-call-video": "element-call",
+      "eightxeight-video": "eightxeight",
+      "discord-video": "discord",
+      "demodesk-video": "demodesk",
+      "campfire-video": "campfire",
+    };
+
+    appSlug = slugMap[appSlug] || appSlug;
+
+    const credentials = await getUsersCredentialsIncludeServiceAccountKey(user);
+
+    const foundApp = getApps(credentials, true).filter((app) => app.slug === appSlug)[0];
+
+    const appLocation = foundApp?.appData?.location;
+
+    if (!foundApp || !appLocation) {
+      throw new BadRequestException(`${appSlug} not connected.`);
+    }
+    return foundApp.credential;
+  }
+
+  transformInputDisableRescheduling(disableRescheduling: CreateEventTypeInput_2024_06_14["disableRescheduling"]) {
+    if (!disableRescheduling) {
+      return {};
+    }
+
+    // If disabled is true, rescheduling is always disabled
+    if (disableRescheduling.disabled === true) {
+      return {
+        disableRescheduling: true,
+        minimumRescheduleNotice: null,
+      };
+    }
+
+    // If minutesBefore is set, use it for conditional disable
+    if (disableRescheduling.minutesBefore && disableRescheduling.minutesBefore > 0) {
+      return {
+        disableRescheduling: false,
+        minimumRescheduleNotice: disableRescheduling.minutesBefore,
+      };
+    }
+
+    // Otherwise rescheduling is not disabled
+    return {
+      disableRescheduling: false,
+      minimumRescheduleNotice: null,
+    };
+  }
+
+  transformInputDisableCancelling(disableCancelling: CreateEventTypeInput_2024_06_14["disableCancelling"]) {
+    if (!disableCancelling) {
+      return {};
+    }
+
+    return {
+      disableCancelling: disableCancelling.disabled === true,
+    };
+  }
+
+  transformInputCalVideoSettings(calVideoSettings: CreateEventTypeInput_2024_06_14["calVideoSettings"]) {
+    if (!calVideoSettings) {
+      return {};
+    }
+
+    // Extract sendTranscriptionEmails from calVideoSettings and map to canSendCalVideoTranscriptionEmails
+    const { sendTranscriptionEmails, ...restCalVideoSettings } = calVideoSettings;
+
+    const hasOtherSettings = Object.keys(restCalVideoSettings).length > 0;
+
+    return {
+      ...(hasOtherSettings ? { calVideoSettings: restCalVideoSettings } : {}),
+      ...(sendTranscriptionEmails !== undefined
+        ? { canSendCalVideoTranscriptionEmails: sendTranscriptionEmails }
+        : {}),
+    };
   }
 }

@@ -1,4 +1,4 @@
-import { createHash } from "crypto";
+import { createHash } from "node:crypto";
 
 import { totpRawCheck } from "@calcom/lib/totp";
 import { prisma } from "@calcom/prisma";
@@ -10,7 +10,7 @@ import type { TVerifyEmailCodeInputSchema } from "./verifyEmailCode.schema";
 
 type VerifyEmailCodeOptions = {
   ctx: {
-    user: NonNullable<TrpcSessionUser>;
+    user: Pick<NonNullable<TrpcSessionUser>, "id">;
   };
   input: TVerifyEmailCodeInputSchema;
 };

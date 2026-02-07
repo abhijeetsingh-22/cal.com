@@ -1,14 +1,14 @@
-import type { Prisma } from "@prisma/client";
 import { defaultResponderForAppDir } from "app/api/defaultResponderForAppDir";
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import dayjs from "@calcom/dayjs";
-import { sendMonthlyDigestEmails } from "@calcom/emails/email-manager";
+import { sendMonthlyDigestEmail } from "@calcom/emails/workflow-email-service";
 import { EventsInsights } from "@calcom/features/insights/server/events";
 import { getTranslation } from "@calcom/lib/server/i18n";
 import prisma from "@calcom/prisma";
+import type { Prisma } from "@calcom/prisma/client";
 
 const querySchema = z.object({
   page: z.coerce.number().min(0).optional().default(0),
@@ -95,7 +95,7 @@ async function postHandler(request: NextRequest) {
       const userIdsFromTeams = team.members.map((u) => u.userId);
 
       // Booking Events
-      const whereConditional: Prisma.BookingTimeStatusWhereInput = {
+      const whereConditional: Prisma.BookingTimeStatusDenormalizedWhereInput = {
         OR: [
           {
             teamId: team.id,
@@ -122,7 +122,7 @@ async function postHandler(request: NextRequest) {
       EventData["Cancelled"] = countGroupedByStatus["cancelled"];
 
       // Most Booked Event Type
-      const bookingWhere: Prisma.BookingTimeStatusWhereInput = {
+      const bookingWhere: Prisma.BookingTimeStatusDenormalizedWhereInput = {
         createdAt: {
           gte: dayjs(firstDateOfMonth).startOf("day").toDate(),
           lte: dayjs(new Date()).endOf("day").toDate(),
@@ -141,7 +141,7 @@ async function postHandler(request: NextRequest) {
         ],
       };
 
-      const bookingsFromSelected = await prisma.bookingTimeStatus.groupBy({
+      const bookingsFromSelected = await prisma.bookingTimeStatusDenormalized.groupBy({
         by: ["eventTypeId"],
         where: bookingWhere,
         _count: {
@@ -234,7 +234,7 @@ async function postHandler(request: NextRequest) {
       });
 
       // Most booked members
-      const bookingsFromTeam = await prisma.bookingTimeStatus.groupBy({
+      const bookingsFromTeam = await prisma.bookingTimeStatusDenormalized.groupBy({
         by: ["userId"],
         where: bookingWhere,
         _count: {
@@ -295,7 +295,7 @@ async function postHandler(request: NextRequest) {
 
           // Only send email if user has allowed to receive monthly digest emails
           if (owner.receiveMonthlyDigestEmail) {
-            await sendMonthlyDigestEmails({
+            await sendMonthlyDigestEmail({
               ...EventData,
               admin: { email: owner?.email ?? "", name: owner?.name ?? "" },
               language: t,

@@ -1,5 +1,7 @@
-import type { NextApiRequest, NextApiResponse } from "next";
+import type { NextResponse } from "next/server";
 
+import { ErrorCode } from "@calcom/lib/errorCodes";
+import { ErrorWithCode } from "@calcom/lib/errors";
 import slugify from "@calcom/lib/slugify";
 import prisma from "@calcom/prisma";
 import { RedirectType } from "@calcom/prisma/enums";
@@ -11,30 +13,29 @@ import notEmpty from "../notEmpty";
 const log = logger.getSubLogger({ prefix: ["server/username"] });
 const cachedData: Set<string> = new Set();
 
-export type RequestWithUsernameStatus = NextApiRequest & {
-  usernameStatus: {
-    /**
-     * ```text
-     * 200: Username is available
-     * 402: Pro username, must be purchased
-     * 418: A user exists with that username
-     * ```
-     */
-    statusCode: 200 | 402 | 418;
-    requestedUserName: string;
-    json: {
-      available: boolean;
-      premium: boolean;
-      message?: string;
-      suggestion?: string;
-    };
+type UsernameStatus = {
+  /**
+   * ```text
+   * 200: Username is available
+   * 402: Pro username, must be purchased
+   * 418: A user exists with that username
+   * ```
+   */
+  statusCode: 200 | 402 | 418;
+  requestedUserName: string;
+  json: {
+    available: boolean;
+    premium: boolean;
+    message?: string;
+    suggestion?: string;
   };
 };
 
-type CustomNextApiHandler<T = unknown> = (
-  req: RequestWithUsernameStatus,
-  res: NextApiResponse<T>
-) => void | Promise<void>;
+export type CustomNextApiHandler = (
+  body: Record<string, string>,
+  usernameStatus: UsernameStatus,
+  query?: Record<string, string>
+) => Promise<NextResponse<any>>;
 
 export async function isBlacklisted(username: string) {
   // NodeJS forEach is very, very fast (these days) so even though we only have to construct the Set
@@ -66,7 +67,7 @@ export const generateUsernameSuggestion = async (users: string[], username: stri
 const processResult = (
   result: "ok" | "username_exists" | "is_premium"
 ): // explicitly assign return value to ensure statusCode is typehinted
-{ statusCode: RequestWithUsernameStatus["usernameStatus"]["statusCode"]; message: string } => {
+{ statusCode: UsernameStatus["statusCode"]; message: string } => {
   // using a switch statement instead of multiple ifs to make sure typescript knows
   // there is only limited options
   switch (result) {
@@ -86,17 +87,16 @@ const processResult = (
 };
 
 const usernameHandler =
-  (handler: CustomNextApiHandler) =>
-  async (req: RequestWithUsernameStatus, res: NextApiResponse): Promise<void> => {
-    const username = slugify(req.body.username);
-    const check = await usernameCheckForSignup({ username, email: req.body.email });
+  (handler: CustomNextApiHandler) => async (body: Record<string, string>, query: Record<string, string>) => {
+    const username = slugify(body.username);
+    const check = await usernameCheckForSignup({ username, email: body.email });
 
     let result: Parameters<typeof processResult>[0] = "ok";
     if (check.premium) result = "is_premium";
     if (!check.available) result = "username_exists";
 
     const { statusCode, message } = processResult(result);
-    req.usernameStatus = {
+    const usernameStatus = {
       statusCode,
       requestedUserName: username,
       json: {
@@ -106,7 +106,7 @@ const usernameHandler =
         suggestion: check.suggestedUsername,
       },
     };
-    return handler(req, res);
+    return handler(body, usernameStatus, query);
   };
 
 const usernameCheck = async (usernameRaw: string, currentOrgDomain?: string | null) => {
@@ -120,11 +120,33 @@ const usernameCheck = async (usernameRaw: string, currentOrgDomain?: string | nu
 
   const username = slugify(usernameRaw);
 
+  let organizationId: number | null = null;
+  if (currentOrgDomain) {
+    // Get organizationId from orgSlug
+    const organization = await prisma.team.findFirst({
+      where: {
+        isOrganization: true,
+        OR: [{ slug: currentOrgDomain }, { metadata: { path: ["requestedSlug"], equals: currentOrgDomain } }],
+      },
+      select: {
+        id: true,
+      },
+    });
+    if (!organization) {
+      throw new ErrorWithCode(
+        ErrorCode.NotFound,
+        `Organization with domain "${currentOrgDomain}" not found`,
+        { currentOrgDomain }
+      );
+    }
+    organizationId = organization.id;
+  }
+
   const user = await prisma.user.findFirst({
     where: {
       username,
-      // Simply remove it when we drop organizationId column
-      organizationId: null,
+      // Check in the specific organization context, or global namespace if no org
+      organizationId: organizationId ?? null,
     },
     select: {
       id: true,
@@ -144,12 +166,13 @@ const usernameCheck = async (usernameRaw: string, currentOrgDomain?: string | nu
     response.premium = true;
   }
 
-  // get list of similar usernames in the db
+  // get list of similar usernames in the db (scoped to organization if checking in org context)
   const users = await prisma.user.findMany({
     where: {
       username: {
         contains: username,
       },
+      ...(organizationId !== null ? { organizationId } : { organizationId: null }),
     },
     select: {
       username: true,

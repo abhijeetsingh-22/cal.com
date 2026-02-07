@@ -1,4 +1,9 @@
 import { API_VERSIONS_VALUES } from "@/lib/api-versions";
+import {
+  OPTIONAL_API_KEY_HEADER,
+  OPTIONAL_X_CAL_CLIENT_ID_HEADER,
+  OPTIONAL_X_CAL_SECRET_KEY_HEADER,
+} from "@/lib/docs/headers";
 import { PlatformPlan } from "@/modules/auth/decorators/billing/platform-plan.decorator";
 import { Roles } from "@/modules/auth/decorators/roles/roles.decorator";
 import { ApiAuthGuard } from "@/modules/auth/guards/api-auth/api-auth.guard";
@@ -7,16 +12,16 @@ import { IsAdminAPIEnabledGuard } from "@/modules/auth/guards/organizations/is-a
 import { IsOrgGuard } from "@/modules/auth/guards/organizations/is-org.guard";
 import { RolesGuard } from "@/modules/auth/guards/roles/roles.guard";
 import { IsTeamInOrg } from "@/modules/auth/guards/teams/is-team-in-org.guard";
+import { OrganizationMembershipService } from "@/lib/services/organization-membership.service";
 import { OrganizationsRepository } from "@/modules/organizations/index/organizations.repository";
 import { CreateOrgTeamMembershipDto } from "@/modules/organizations/teams/memberships/inputs/create-organization-team-membership.input";
 import { UpdateOrgTeamMembershipDto } from "@/modules/organizations/teams/memberships/inputs/update-organization-team-membership.input";
 import {
-  OrgTeamMembershipOutputDto,
   OrgTeamMembershipsOutputResponseDto,
   OrgTeamMembershipOutputResponseDto,
 } from "@/modules/organizations/teams/memberships/outputs/organization-teams-memberships.output";
 import { OrganizationsTeamsMembershipsService } from "@/modules/organizations/teams/memberships/services/organizations-teams-memberships.service";
-import { TeamsEventTypesService } from "@/modules/teams/event-types/services/teams-event-types.service";
+import { TeamMembershipOutput } from "@/modules/teams/memberships/outputs/team-membership.output";
 import {
   Controller,
   UseGuards,
@@ -33,7 +38,7 @@ import {
   UnprocessableEntityException,
   Logger,
 } from "@nestjs/common";
-import { ApiOperation, ApiTags as DocsTags } from "@nestjs/swagger";
+import { ApiHeader, ApiOperation, ApiTags as DocsTags } from "@nestjs/swagger";
 import { plainToClass } from "class-transformer";
 
 import { SUCCESS_STATUS } from "@calcom/platform-constants";
@@ -46,14 +51,17 @@ import { SkipTakePagination } from "@calcom/platform-types";
 })
 @UseGuards(ApiAuthGuard, IsOrgGuard, RolesGuard, IsTeamInOrg, PlatformPlanGuard, IsAdminAPIEnabledGuard)
 @DocsTags("Orgs / Teams / Memberships")
+@ApiHeader(OPTIONAL_X_CAL_CLIENT_ID_HEADER)
+@ApiHeader(OPTIONAL_X_CAL_SECRET_KEY_HEADER)
+@ApiHeader(OPTIONAL_API_KEY_HEADER)
 export class OrganizationsTeamsMembershipsController {
   private logger = new Logger("OrganizationsTeamsMembershipsController");
 
   constructor(
     private organizationsTeamsMembershipsService: OrganizationsTeamsMembershipsService,
-    private teamsEventTypesService: TeamsEventTypesService,
-    private readonly organizationsRepository: OrganizationsRepository
-  ) {}
+    private readonly organizationsRepository: OrganizationsRepository,
+    private readonly orgMembershipService: OrganizationMembershipService
+  ) { }
 
   @Get("/")
   @ApiOperation({ summary: "Get all memberships" })
@@ -76,7 +84,7 @@ export class OrganizationsTeamsMembershipsController {
     return {
       status: SUCCESS_STATUS,
       data: orgTeamMemberships.map((membership) =>
-        plainToClass(OrgTeamMembershipOutputDto, membership, { strategy: "excludeAll" })
+        plainToClass(TeamMembershipOutput, membership, { strategy: "excludeAll" })
       ),
     };
   }
@@ -99,7 +107,7 @@ export class OrganizationsTeamsMembershipsController {
     );
     return {
       status: SUCCESS_STATUS,
-      data: plainToClass(OrgTeamMembershipOutputDto, orgTeamMembership, { strategy: "excludeAll" }),
+      data: plainToClass(TeamMembershipOutput, orgTeamMembership, { strategy: "excludeAll" }),
     };
   }
 
@@ -119,11 +127,9 @@ export class OrganizationsTeamsMembershipsController {
       membershipId
     );
 
-    await this.teamsEventTypesService.deleteUserTeamEventTypesAndHosts(membership.userId, teamId);
-
     return {
       status: SUCCESS_STATUS,
-      data: plainToClass(OrgTeamMembershipOutputDto, membership, { strategy: "excludeAll" }),
+      data: plainToClass(TeamMembershipOutput, membership, { strategy: "excludeAll" }),
     };
   }
 
@@ -160,10 +166,13 @@ export class OrganizationsTeamsMembershipsController {
 
     return {
       status: SUCCESS_STATUS,
-      data: plainToClass(OrgTeamMembershipOutputDto, updatedMembership, { strategy: "excludeAll" }),
+      data: plainToClass(TeamMembershipOutput, updatedMembership, { strategy: "excludeAll" }),
     };
   }
 
+
+  // TODO: Refactor to use inviteMembersWithNoInviterPermissionCheck when it is moved to a Service
+  // See: packages/trpc/server/routers/viewer/teams/inviteMember/inviteMember.handler.ts
   @Roles("TEAM_ADMIN")
   @PlatformPlan("ESSENTIALS")
   @Post("/")
@@ -180,7 +189,21 @@ export class OrganizationsTeamsMembershipsController {
       throw new UnprocessableEntityException("User is not part of the Organization");
     }
 
-    const membership = await this.organizationsTeamsMembershipsService.createOrgTeamMembership(teamId, data);
+    const shouldAutoAccept = await this.orgMembershipService.shouldAutoAccept({
+      organizationId: orgId,
+      userEmail: user.email,
+    });
+
+    // ALWAYS override when email matches - prevents pending memberships
+    // Remember organizations expect added team member to automatically start receiving bookings for the team event
+    const acceptedStatus = shouldAutoAccept ? true : (data.accepted ?? false);
+
+    const membershipData = { ...data, accepted: acceptedStatus };
+    const membership = await this.organizationsTeamsMembershipsService.createOrgTeamMembership(
+      teamId,
+      membershipData
+    );
+
     if (membership.accepted) {
       try {
         await updateNewTeamMemberEventTypes(user.id, teamId);
@@ -190,7 +213,7 @@ export class OrganizationsTeamsMembershipsController {
     }
     return {
       status: SUCCESS_STATUS,
-      data: plainToClass(OrgTeamMembershipOutputDto, membership, { strategy: "excludeAll" }),
+      data: plainToClass(TeamMembershipOutput, membership, { strategy: "excludeAll" }),
     };
   }
 }

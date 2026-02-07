@@ -11,6 +11,7 @@ export interface CrmData {
 export interface ContactCreateInput {
   email: string;
   name: string;
+  phone?: string | null;
 }
 
 export interface Contact {
@@ -33,7 +34,7 @@ export interface CrmEvent {
 export interface CRM {
   createEvent: (event: CalendarEvent, contacts: Contact[]) => Promise<CrmEvent | undefined>;
   updateEvent: (uid: string, event: CalendarEvent) => Promise<CrmEvent>;
-  deleteEvent: (uid: string) => Promise<void>;
+  deleteEvent: (uid: string, event: CalendarEvent) => Promise<void>;
   getContacts: ({
     emails,
     includeOwner,
