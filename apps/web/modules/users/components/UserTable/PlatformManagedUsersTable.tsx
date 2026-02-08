@@ -1,16 +1,6 @@
 "use client";
 
-import { keepPreviousData } from "@tanstack/react-query";
-import { getCoreRowModel, getSortedRowModel, useReactTable, type ColumnDef } from "@tanstack/react-table";
-import { useMemo, useReducer, useState } from "react";
-
-import {
-  DataTableProvider,
-  useColumnFilters,
-  useDataTable,
-} from "@calcom/features/data-table";
-import { DataTableWrapper, DataTableToolbar, DataTableFilters, DataTableSegment, DataTableSelectionBar } from "~/data-table/components";
-import { useSegments } from "~/data-table/hooks/useSegments";
+import { DataTableProvider, useColumnFilters, useDataTable } from "@calcom/features/data-table";
 import { getUserAvatarUrl } from "@calcom/lib/getAvatarUrl";
 import { useLocale } from "@calcom/lib/hooks/useLocale";
 import { trpc } from "@calcom/trpc/react";
@@ -18,10 +8,20 @@ import { Avatar } from "@calcom/ui/components/avatar";
 import { Badge } from "@calcom/ui/components/badge";
 import { Checkbox } from "@calcom/ui/components/form";
 import { SkeletonText } from "@calcom/ui/components/skeleton";
-
+import { keepPreviousData } from "@tanstack/react-query";
+import { type ColumnDef, getCoreRowModel, getSortedRowModel, useReactTable } from "@tanstack/react-table";
+import { useMemo, useReducer, useState } from "react";
+import {
+  DataTableFilters,
+  DataTableSegment,
+  DataTableSelectionBar,
+  DataTableToolbar,
+  DataTableWrapper,
+} from "~/data-table/components";
+import { useSegments } from "~/data-table/hooks/useSegments";
 import { DeleteBulkUsers } from "./BulkActions/DeleteBulkUsers";
 import { DeleteMemberModal } from "./DeleteMemberModal";
-import type { UserTableState, UserTableAction, PlatformManagedUserTableUser } from "./types";
+import type { PlatformManagedUserTableUser, UserTableAction, UserTableState } from "./types";
 
 const initialState: UserTableState = {
   changeMemberRole: {
@@ -271,7 +271,6 @@ function UserListTableContent({ oAuthClientId }: PlatformManagedUsersTableProps)
           deleteMember: { showModal: false },
           impersonateMember: { showModal: false },
           inviteMember: { showModal: false },
-          importMembers: { showModal: false },
           editSheet: { showModal: false },
         };
       default:

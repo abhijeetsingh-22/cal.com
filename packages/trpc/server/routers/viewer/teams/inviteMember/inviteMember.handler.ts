@@ -1,21 +1,18 @@
-import { type TFunction } from "i18next";
-
 import { getTeamBillingServiceFactory } from "@calcom/ee/billing/di/containers/Billing";
 import { DueInvoiceService } from "@calcom/features/ee/billing/service/dueInvoice/DueInvoiceService";
 import { PermissionCheckService } from "@calcom/features/pbac/services/permission-check.service";
+import { isOrganisationOwner } from "@calcom/features/pbac/utils/isOrganisationAdmin";
 import { UserRepository } from "@calcom/features/users/repositories/UserRepository";
 import { checkRateLimitAndThrowError } from "@calcom/lib/checkRateLimitAndThrowError";
 import logger from "@calcom/lib/logger";
 import { safeStringify } from "@calcom/lib/safeStringify";
 import { getTranslation } from "@calcom/lib/server/i18n";
-import { isOrganisationOwner } from "@calcom/features/pbac/utils/isOrganisationAdmin";
 import prisma from "@calcom/prisma";
-import { MembershipRole } from "@calcom/prisma/enums";
 import type { CreationSource } from "@calcom/prisma/enums";
+import { MembershipRole } from "@calcom/prisma/enums";
 import type { TrpcSessionUser } from "@calcom/trpc/server/types";
-
 import { TRPCError } from "@trpc/server";
-
+import type { TFunction } from "i18next";
 import type { TInviteMemberInputSchema } from "./inviteMember.schema";
 import type { TeamWithParent } from "./types";
 import type { Invitation } from "./utils";
@@ -26,7 +23,8 @@ import {
   getOrgState,
   getTeamOrThrow,
   getUniqueInvitationsOrThrowIfEmpty,
-  handleExistingMemberUpdates,
+  handleAttributeAssignment,
+  handleExistingMemberRoleUpdates,
   handleExistingUsersInvites,
   handleNewUsersInvites,
   INVITE_STATUS,
@@ -47,23 +45,26 @@ function getOrgConnectionInfoGroupedByUsernameOrEmail({
   team,
   isOrg,
 }: {
-  uniqueInvitations: { usernameOrEmail: string; role: MembershipRole }[];
+  uniqueInvitations: Invitation[];
   orgState: ReturnType<typeof getOrgState>;
   team: Pick<TeamWithParent, "parentId" | "id">;
   isOrg: boolean;
 }) {
-  return uniqueInvitations.reduce((acc, invitation) => {
-    return {
-      ...acc,
-      [invitation.usernameOrEmail]: getOrgConnectionInfo({
-        orgVerified: orgState.orgVerified,
-        orgAutoAcceptDomain: orgState.autoAcceptEmailDomain,
-        email: invitation.usernameOrEmail,
-        team,
-        isOrg: isOrg,
-      }),
-    };
-  }, {} as Record<string, ReturnType<typeof getOrgConnectionInfo>>);
+  return uniqueInvitations.reduce(
+    (acc, invitation) => {
+      return {
+        ...acc,
+        [invitation.usernameOrEmail]: getOrgConnectionInfo({
+          orgVerified: orgState.orgVerified,
+          orgAutoAcceptDomain: orgState.autoAcceptEmailDomain,
+          email: invitation.usernameOrEmail,
+          team,
+          isOrg: isOrg,
+        }),
+      };
+    },
+    {} as Record<string, ReturnType<typeof getOrgConnectionInfo>>
+  );
 }
 
 function getInvitationsForNewUsers({
@@ -122,6 +123,7 @@ function buildInvitationsFromInput({
     return {
       usernameOrEmail: usernameOrEmail.email,
       role: usernameOrEmail.role,
+      attributes: usernameOrEmail.attributes,
     };
   });
 }
@@ -140,10 +142,7 @@ export const inviteMembersWithNoInviterPermissionCheck = async (
     language: string;
     inviterName: string | null;
     orgSlug: string | null;
-    invitations: {
-      usernameOrEmail: string;
-      role: MembershipRole;
-    }[];
+    invitations: Invitation[];
     creationSource: CreationSource;
     /**
      * Whether invitation is a direct user action or not i.e. we need to show them User based errors like inviting existing users or not.
@@ -240,22 +239,24 @@ export const inviteMembersWithNoInviterPermissionCheck = async (
   // Handle updates to existing members/pending invitations when in bulk import mode
   let numExistingUsersUpdated = 0;
   if (beSilentAboutErrors && existingMembersToUpdate.length) {
-    numExistingUsersUpdated = await handleExistingMemberUpdates({
+    numExistingUsersUpdated = await handleExistingMemberRoleUpdates({
       existingMembersToUpdate: existingMembersToUpdate.map((user) => ({
         id: user.id,
         email: user.email,
         username: user.username,
         newRole: user.newRole,
       })),
-      team,
       teamId: team.id,
-      language,
     });
   }
 
   const teamBillingServiceFactory = getTeamBillingServiceFactory();
   const teamBillingService = teamBillingServiceFactory.init(team);
   await teamBillingService.updateQuantity();
+
+  const { numAttributesAssigned, numAttributesFailed } = isTeamAnOrg
+    ? await handleAttributeAssignment({ invitations, teamId: team.id })
+    : { numAttributesAssigned: 0, numAttributesFailed: 0 };
 
   return {
     // TODO: Better rename it to invitations only maybe?
@@ -265,6 +266,8 @@ export const inviteMembersWithNoInviterPermissionCheck = async (
         : invitations.map((invitation) => invitation.usernameOrEmail),
     numUsersInvited: invitableExistingUsers.length + invitationsForNewUsers.length,
     numExistingUsersUpdated,
+    numAttributesAssigned,
+    numAttributesFailed,
   };
 };
 
@@ -291,8 +294,8 @@ const inviteMembers = async ({ ctx, input }: InviteMemberOptions) => {
 
   // Check if invitations are blocked due to unpaid invoices
   const dueInvoiceService = new DueInvoiceService();
-  const inviteeEmails = (typeof usernameOrEmail === "string" ? [usernameOrEmail] : usernameOrEmail).map((u) =>
-    typeof u === "string" ? u : u.email
+  const inviteeEmails = (typeof usernameOrEmail === "string" ? [usernameOrEmail] : usernameOrEmail).map(
+    (u) => (typeof u === "string" ? u : u.email)
   );
   const canInvite = await dueInvoiceService.canInviteToTeam({
     teamId: team.id,

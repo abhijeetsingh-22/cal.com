@@ -10,14 +10,14 @@ type SimpleAttributeInput = {
 
 type SelectAttributeInput = {
   id: string;
-  options: { value: string }[];
+  options: { value: string; weight?: number }[];
   type: AttributeType;
 };
 
 type AttributeInput = {
   id: string;
   value?: string;
-  options?: { value: string }[];
+  options?: { value: string; weight?: number }[];
   type?: AttributeType;
 };
 
@@ -163,8 +163,9 @@ export const handleSelectAttribute = async (
       create: {
         memberId,
         attributeOptionId: option.value,
+        weight: option.weight ?? null,
       },
-      update: {}, // No update needed if it already exists
+      update: option.weight !== undefined ? { weight: option.weight } : {},
     });
   }
 };

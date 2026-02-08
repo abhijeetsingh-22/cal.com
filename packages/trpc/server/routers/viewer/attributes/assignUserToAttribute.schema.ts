@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-const attributeSchema = z.object({
+export const attributeSchema = z.object({
   id: z.string(),
   options: z
     .array(z.object({ label: z.string().optional(), value: z.string(), weight: z.number().optional() }))
