@@ -1,8 +1,7 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
-
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  handleSimpleAttribute,
   handleSelectAttribute,
+  handleSimpleAttribute,
   processUserAttributes,
   removeAttribute,
 } from "./attributeUtils";
@@ -213,6 +212,53 @@ describe("Attribute Utils", () => {
           },
         },
       });
+      expect(mockTx.attributeToUser.upsert).toHaveBeenCalledWith({
+        where: {
+          memberId_attributeOptionId: {
+            memberId: 1,
+            attributeOptionId: "opt-1",
+          },
+        },
+        create: {
+          memberId: 1,
+          attributeOptionId: "opt-1",
+        },
+        update: {},
+      });
+    });
+
+    it("should persist weight value when provided", async () => {
+      await handleSelectAttribute(mockTx as any, 1, {
+        id: "attr-1",
+        options: [{ value: "opt-1", weight: 75 }],
+        type: "SINGLE_SELECT",
+      });
+
+      expect(mockTx.attributeToUser.upsert).toHaveBeenCalledWith({
+        where: {
+          memberId_attributeOptionId: {
+            memberId: 1,
+            attributeOptionId: "opt-1",
+          },
+        },
+        create: {
+          memberId: 1,
+          attributeOptionId: "opt-1",
+          weight: 75,
+        },
+        update: {
+          weight: 75,
+        },
+      });
+    });
+
+    it("should handle undefined weight by not updating existing weight", async () => {
+      await handleSelectAttribute(mockTx as any, 1, {
+        id: "attr-1",
+        options: [{ value: "opt-1" }],
+        type: "MULTI_SELECT",
+      });
+
       expect(mockTx.attributeToUser.upsert).toHaveBeenCalledWith({
         where: {
           memberId_attributeOptionId: {

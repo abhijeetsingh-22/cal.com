@@ -163,9 +163,9 @@ export const handleSelectAttribute = async (
       create: {
         memberId,
         attributeOptionId: option.value,
-        weight: option.weight ?? null,
+        weight: option.weight,
       },
-      update: option.weight !== undefined ? { weight: option.weight } : {},
+      update: { weight: option.weight },
     });
   }
 };
