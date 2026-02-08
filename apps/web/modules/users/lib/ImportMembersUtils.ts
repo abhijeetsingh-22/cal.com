@@ -140,7 +140,7 @@ export function parseCSVContent({
           if (matchedOption) {
             options.push({
               value: matchedOption.id,
-              weight,
+              ...(attribute.isWeightsEnabled ? { weight } : {}),
             });
           }
         }
