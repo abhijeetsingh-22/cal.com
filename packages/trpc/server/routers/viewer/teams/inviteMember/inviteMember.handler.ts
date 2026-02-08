@@ -254,9 +254,9 @@ export const inviteMembersWithNoInviterPermissionCheck = async (
   const teamBillingService = teamBillingServiceFactory.init(team);
   await teamBillingService.updateQuantity();
 
-  const { numAttributesAssigned, numAttributesFailed } = isTeamAnOrg
+  const { numAttributesFailed } = isTeamAnOrg
     ? await handleAttributeAssignment({ invitations, teamId: team.id })
-    : { numAttributesAssigned: 0, numAttributesFailed: 0 };
+    : { numAttributesFailed: 0 };
 
   return {
     // TODO: Better rename it to invitations only maybe?
@@ -266,7 +266,6 @@ export const inviteMembersWithNoInviterPermissionCheck = async (
         : invitations.map((invitation) => invitation.usernameOrEmail),
     numUsersInvited: invitableExistingUsers.length + invitationsForNewUsers.length,
     numExistingUsersUpdated,
-    numAttributesAssigned,
     numAttributesFailed,
   };
 };

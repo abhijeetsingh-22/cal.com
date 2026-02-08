@@ -172,39 +172,28 @@ export function showImportSuccessToast(
   data: {
     numUsersInvited: number;
     numExistingUsersUpdated?: number;
-    numAttributesAssigned?: number;
     numAttributesFailed?: number;
   },
   t: (key: string, params?: Record<string, unknown>) => string
 ) {
   if (data.numAttributesFailed && data.numAttributesFailed > 0) {
     showToast(
-      t("import_complete_with_attribute_failures", {
+      t("import_members_invited_updated_failed", {
         invited: data.numUsersInvited,
         updated: data.numExistingUsersUpdated ?? 0,
-        assigned: data.numAttributesAssigned ?? 0,
         failed: data.numAttributesFailed,
       }),
       "warning"
     );
-  } else if (data.numAttributesAssigned && data.numAttributesAssigned > 0) {
-    showToast(
-      t("import_complete_with_attributes", {
-        invited: data.numUsersInvited,
-        updated: data.numExistingUsersUpdated ?? 0,
-        assigned: data.numAttributesAssigned,
-      }),
-      "success"
-    );
   } else if (data.numExistingUsersUpdated && data.numExistingUsersUpdated > 0) {
     showToast(
-      t("email_invite_team_bulk_with_updates", {
-        userCount: data.numUsersInvited,
-        updatedCount: data.numExistingUsersUpdated,
+      t("import_members_invited_updated", {
+        invited: data.numUsersInvited,
+        updated: data.numExistingUsersUpdated,
       }),
       "success"
     );
   } else {
-    showToast(t("email_invite_team_bulk", { userCount: data.numUsersInvited }), "success");
+    showToast(t("import_members_invited", { invited: data.numUsersInvited }), "success");
   }
 }

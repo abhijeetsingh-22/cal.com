@@ -865,13 +865,13 @@ export async function handleAttributeAssignment({
 }: {
   invitations: Invitation[];
   teamId: number;
-}): Promise<{ numAttributesAssigned: number; numAttributesFailed: number }> {
+}): Promise<{ numAttributesFailed: number }> {
   const myLog = log.getSubLogger({ prefix: ["handleAttributeAssignment"] });
 
   const invitationsWithAttributes = invitations.filter((inv) => inv.attributes?.length);
 
   if (invitationsWithAttributes.length === 0) {
-    return { numAttributesAssigned: 0, numAttributesFailed: 0 };
+    return { numAttributesFailed: 0 };
   }
 
   const allAttributeIds = Array.from(
@@ -935,18 +935,15 @@ export async function handleAttributeAssignment({
     })
   );
 
-  let numAttributesAssigned = 0;
   let numAttributesFailed = 0;
 
   for (const result of results) {
-    if (result.success) {
-      numAttributesAssigned++;
-    } else {
+    if (!result.success) {
       numAttributesFailed++;
     }
   }
 
-  return { numAttributesAssigned, numAttributesFailed };
+  return { numAttributesFailed };
 }
 
 export async function handleExistingUsersInvites({
