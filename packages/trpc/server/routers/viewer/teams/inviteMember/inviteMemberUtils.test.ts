@@ -2,7 +2,6 @@ import { PermissionCheckService } from "@calcom/features/pbac/services/permissio
 import { CreationSource, MembershipRole } from "@calcom/prisma/enums";
 import { TRPCError } from "@trpc/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-
 import type { TeamWithParent } from "./types";
 import type { UserWithMembership } from "./utils";
 import {
@@ -15,13 +14,23 @@ import {
   getOrgConnectionInfo,
   getOrgState,
   getUniqueInvitationsOrThrowIfEmpty,
+  handleExistingMemberRoleUpdates,
   INVITE_STATUS,
 } from "./utils";
 
-const { mockCreateMany, mockUserCreate, mockMembershipCreate, mockTransaction } = vi.hoisted(() => {
+const {
+  mockCreateMany,
+  mockUserCreate,
+  mockMembershipCreate,
+  mockMembershipFindFirst,
+  mockMembershipUpdateMany,
+  mockTransaction,
+} = vi.hoisted(() => {
   const mockCreateManyFn = vi.fn();
   const mockUserCreateFn = vi.fn();
   const mockMembershipCreateFn = vi.fn();
+  const mockMembershipFindFirstFn = vi.fn();
+  const mockMembershipUpdateManyFn = vi.fn();
   const mockTransactionFn = vi.fn(async (callback: (tx: any) => Promise<unknown>) => {
     return callback({
       user: {
@@ -29,6 +38,8 @@ const { mockCreateMany, mockUserCreate, mockMembershipCreate, mockTransaction } 
       },
       membership: {
         create: mockMembershipCreateFn,
+        findFirst: mockMembershipFindFirstFn,
+        updateMany: mockMembershipUpdateManyFn,
       },
     });
   });
@@ -37,6 +48,8 @@ const { mockCreateMany, mockUserCreate, mockMembershipCreate, mockTransaction } 
     mockCreateMany: mockCreateManyFn,
     mockUserCreate: mockUserCreateFn,
     mockMembershipCreate: mockMembershipCreateFn,
+    mockMembershipFindFirst: mockMembershipFindFirstFn,
+    mockMembershipUpdateMany: mockMembershipUpdateManyFn,
     mockTransaction: mockTransactionFn,
   };
 });
@@ -887,6 +900,49 @@ describe("Invite Member Utils", () => {
       expect(createdMemberships).toHaveLength(1);
       // Should use inviter's chosen role when no parentId
       expect(createdMemberships[0].role).toBe(MembershipRole.MEMBER);
+    });
+  });
+
+  describe("handleExistingMemberRoleUpdates", () => {
+    beforeEach(() => {
+      mockMembershipFindFirst.mockReset();
+      mockMembershipUpdateMany.mockReset();
+      mockTransaction.mockClear();
+    });
+
+    it("should only count members whose role actually changed", async () => {
+      mockMembershipFindFirst
+        .mockResolvedValueOnce({ role: MembershipRole.MEMBER })
+        .mockResolvedValueOnce({ role: MembershipRole.ADMIN });
+
+      const result = await handleExistingMemberRoleUpdates({
+        existingMembersToUpdate: [
+          { id: 1, email: "user1@example.com", username: "user1", newRole: MembershipRole.ADMIN },
+          { id: 2, email: "user2@example.com", username: "user2", newRole: MembershipRole.ADMIN },
+        ],
+        teamId: mockedRegularTeam.id,
+      });
+
+      expect(result).toBe(1);
+      expect(mockMembershipUpdateMany).toHaveBeenCalledTimes(1);
+      expect(mockMembershipUpdateMany).toHaveBeenCalledWith({
+        where: { userId: 1, teamId: mockedRegularTeam.id },
+        data: { role: MembershipRole.ADMIN },
+      });
+    });
+
+    it("should skip update when existing role matches new role", async () => {
+      mockMembershipFindFirst.mockResolvedValueOnce({ role: MembershipRole.MEMBER });
+
+      const result = await handleExistingMemberRoleUpdates({
+        existingMembersToUpdate: [
+          { id: 1, email: "user1@example.com", username: "user1", newRole: MembershipRole.MEMBER },
+        ],
+        teamId: mockedRegularTeam.id,
+      });
+
+      expect(result).toBe(0);
+      expect(mockMembershipUpdateMany).not.toHaveBeenCalled();
     });
   });
 });
