@@ -1,7 +1,7 @@
+import { emailRegex } from "@calcom/lib/emailSchema";
 import type { MembershipRole } from "@calcom/prisma/enums";
 import { MembershipRole as MembershipRoleEnum } from "@calcom/prisma/enums";
 import type { RouterOutputs } from "@calcom/trpc/react";
-import { isEmail } from "@calcom/trpc/server/routers/viewer/teams/util";
 import { showToast } from "@calcom/ui/components/toast";
 
 function parseCSVRow(row: string): string[] {
@@ -88,7 +88,7 @@ export function parseCSVContent({
     const columns = parseCSVRow(line);
     const email = columns[emailIndex]?.trim();
 
-    if (!email || !isEmail(email)) {
+    if (!email || !emailRegex.test(email)) {
       continue;
     }
 
