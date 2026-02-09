@@ -825,38 +825,58 @@ export async function handleExistingMemberRoleUpdates({
     return 0;
   }
 
-  let actualUpdatedCount = 0;
+  const memberIds = existingMembersToUpdate.map((m) => m.id);
 
-  await prisma.$transaction(async (tx) => {
-    for (const member of existingMembersToUpdate) {
-      const existingMembership = await tx.membership.findFirst({
-        where: {
-          userId: member.id,
-          teamId: teamId,
-        },
-        select: {
-          role: true,
-        },
-      });
-
-      if (existingMembership && existingMembership.role !== member.newRole) {
-        await tx.membership.updateMany({
-          where: {
-            userId: member.id,
-            teamId: teamId,
-          },
-          data: {
-            role: member.newRole,
-          },
-        });
-        actualUpdatedCount++;
-      }
-    }
+  const existingMemberships = await prisma.membership.findMany({
+    where: {
+      userId: { in: memberIds },
+      teamId,
+    },
+    select: {
+      userId: true,
+      role: true,
+    },
   });
 
-  myLog.debug(`Successfully updated ${actualUpdatedCount} existing members`);
+  const currentRoleByUserId = new Map(existingMemberships.map((m) => [m.userId, m.role]));
 
-  return actualUpdatedCount;
+  const membersToUpdate = existingMembersToUpdate.filter((member) => {
+    const currentRole = currentRoleByUserId.get(member.id);
+    return currentRole && currentRole !== member.newRole;
+  });
+
+  if (membersToUpdate.length === 0) {
+    myLog.debug("No role changes needed");
+    return 0;
+  }
+
+  const membersByTargetRole = new Map<MembershipRole, number[]>();
+  for (const member of membersToUpdate) {
+    const existing = membersByTargetRole.get(member.newRole);
+    if (existing) {
+      existing.push(member.id);
+    } else {
+      membersByTargetRole.set(member.newRole, [member.id]);
+    }
+  }
+
+  await prisma.$transaction(
+    Array.from(membersByTargetRole.entries()).map(([role, userIds]) =>
+      prisma.membership.updateMany({
+        where: {
+          userId: { in: userIds },
+          teamId,
+        },
+        data: {
+          role,
+        },
+      })
+    )
+  );
+
+  myLog.debug(`Successfully updated ${membersToUpdate.length} existing members`);
+
+  return membersToUpdate.length;
 }
 
 export async function handleAttributeAssignment({

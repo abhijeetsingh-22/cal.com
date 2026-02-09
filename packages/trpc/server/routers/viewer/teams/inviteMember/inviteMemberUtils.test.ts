@@ -14,6 +14,7 @@ import {
   getOrgConnectionInfo,
   getOrgState,
   getUniqueInvitationsOrThrowIfEmpty,
+  handleAttributeAssignment,
   handleExistingMemberRoleUpdates,
   INVITE_STATUS,
 } from "./utils";
@@ -21,25 +22,32 @@ import {
 const {
   mockCreateMany,
   mockUserCreate,
+  mockUserFindMany,
   mockMembershipCreate,
-  mockMembershipFindFirst,
+  mockMembershipFindMany,
   mockMembershipUpdateMany,
+  mockAttributeFindMany,
+  mockProcessUserAttributes,
   mockTransaction,
 } = vi.hoisted(() => {
   const mockCreateManyFn = vi.fn();
   const mockUserCreateFn = vi.fn();
+  const mockUserFindManyFn = vi.fn();
   const mockMembershipCreateFn = vi.fn();
-  const mockMembershipFindFirstFn = vi.fn();
+  const mockMembershipFindManyFn = vi.fn();
   const mockMembershipUpdateManyFn = vi.fn();
-  const mockTransactionFn = vi.fn(async (callback: (tx: any) => Promise<unknown>) => {
-    return callback({
+  const mockAttributeFindManyFn = vi.fn();
+  const mockProcessUserAttributesFn = vi.fn();
+  const mockTransactionFn = vi.fn(async (callbackOrArray: any) => {
+    if (Array.isArray(callbackOrArray)) {
+      return Promise.all(callbackOrArray);
+    }
+    return callbackOrArray({
       user: {
         create: mockUserCreateFn,
       },
       membership: {
         create: mockMembershipCreateFn,
-        findFirst: mockMembershipFindFirstFn,
-        updateMany: mockMembershipUpdateManyFn,
       },
     });
   });
@@ -47,9 +55,12 @@ const {
   return {
     mockCreateMany: mockCreateManyFn,
     mockUserCreate: mockUserCreateFn,
+    mockUserFindMany: mockUserFindManyFn,
     mockMembershipCreate: mockMembershipCreateFn,
-    mockMembershipFindFirst: mockMembershipFindFirstFn,
+    mockMembershipFindMany: mockMembershipFindManyFn,
     mockMembershipUpdateMany: mockMembershipUpdateManyFn,
+    mockAttributeFindMany: mockAttributeFindManyFn,
+    mockProcessUserAttributes: mockProcessUserAttributesFn,
     mockTransaction: mockTransactionFn,
   };
 });
@@ -59,14 +70,24 @@ vi.mock("@calcom/prisma", () => {
     prisma: {
       membership: {
         createMany: mockCreateMany,
+        findMany: mockMembershipFindMany,
+        updateMany: mockMembershipUpdateMany,
       },
       user: {
         create: mockUserCreate,
+        findMany: mockUserFindMany,
+      },
+      attribute: {
+        findMany: mockAttributeFindMany,
       },
       $transaction: mockTransaction,
     },
   };
 });
+
+vi.mock("../../attributes/attributeUtils", () => ({
+  processUserAttributes: (...args: unknown[]) => mockProcessUserAttributes(...args),
+}));
 
 vi.mock("@calcom/features/pbac/utils/isOrganisationAdmin", () => {
   return {
@@ -905,15 +926,17 @@ describe("Invite Member Utils", () => {
 
   describe("handleExistingMemberRoleUpdates", () => {
     beforeEach(() => {
-      mockMembershipFindFirst.mockReset();
+      mockMembershipFindMany.mockReset();
       mockMembershipUpdateMany.mockReset();
       mockTransaction.mockClear();
     });
 
     it("should only count members whose role actually changed", async () => {
-      mockMembershipFindFirst
-        .mockResolvedValueOnce({ role: MembershipRole.MEMBER })
-        .mockResolvedValueOnce({ role: MembershipRole.ADMIN });
+      mockMembershipFindMany.mockResolvedValueOnce([
+        { userId: 1, role: MembershipRole.MEMBER },
+        { userId: 2, role: MembershipRole.ADMIN },
+      ]);
+      mockMembershipUpdateMany.mockResolvedValue({ count: 1 });
 
       const result = await handleExistingMemberRoleUpdates({
         existingMembersToUpdate: [
@@ -924,15 +947,14 @@ describe("Invite Member Utils", () => {
       });
 
       expect(result).toBe(1);
-      expect(mockMembershipUpdateMany).toHaveBeenCalledTimes(1);
       expect(mockMembershipUpdateMany).toHaveBeenCalledWith({
-        where: { userId: 1, teamId: mockedRegularTeam.id },
+        where: { userId: { in: [1] }, teamId: mockedRegularTeam.id },
         data: { role: MembershipRole.ADMIN },
       });
     });
 
     it("should skip update when existing role matches new role", async () => {
-      mockMembershipFindFirst.mockResolvedValueOnce({ role: MembershipRole.MEMBER });
+      mockMembershipFindMany.mockResolvedValueOnce([{ userId: 1, role: MembershipRole.MEMBER }]);
 
       const result = await handleExistingMemberRoleUpdates({
         existingMembersToUpdate: [
@@ -943,6 +965,95 @@ describe("Invite Member Utils", () => {
 
       expect(result).toBe(0);
       expect(mockMembershipUpdateMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("handleAttributeAssignment", () => {
+    beforeEach(() => {
+      mockAttributeFindMany.mockReset();
+      mockUserFindMany.mockReset();
+      mockProcessUserAttributes.mockReset();
+      mockTransaction.mockClear();
+    });
+
+    it("should return 0 failures when no invitations have attributes", async () => {
+      const result = await handleAttributeAssignment({
+        invitations: [{ usernameOrEmail: "user@example.com", role: MembershipRole.MEMBER }],
+        teamId: 1,
+      });
+
+      expect(result).toEqual({ numAttributesFailed: 0 });
+    });
+
+    it("should successfully assign attributes when user and attributes are valid", async () => {
+      mockAttributeFindMany.mockResolvedValueOnce([{ id: "attr-1", type: "TEXT" }]);
+      mockUserFindMany.mockResolvedValueOnce([{ id: 10, email: "user@example.com" }]);
+      mockProcessUserAttributes.mockResolvedValueOnce({ success: true });
+
+      const result = await handleAttributeAssignment({
+        invitations: [
+          {
+            usernameOrEmail: "user@example.com",
+            role: MembershipRole.MEMBER,
+            attributes: [{ id: "attr-1", value: "Engineering" }],
+          },
+        ],
+        teamId: 1,
+      });
+
+      expect(result).toEqual({ numAttributesFailed: 0 });
+      expect(mockProcessUserAttributes).toHaveBeenCalledWith(
+        expect.anything(),
+        10,
+        1,
+        expect.arrayContaining([
+          expect.objectContaining({ id: "attr-1", value: "Engineering", type: "TEXT" }),
+        ])
+      );
+    });
+
+    it("should count failure when processUserAttributes throws", async () => {
+      mockAttributeFindMany.mockResolvedValueOnce([{ id: "attr-1", type: "TEXT" }]);
+      mockUserFindMany.mockResolvedValueOnce([{ id: 10, email: "user@example.com" }]);
+      mockTransaction.mockRejectedValueOnce(new Error("DB error"));
+
+      const result = await handleAttributeAssignment({
+        invitations: [
+          {
+            usernameOrEmail: "user@example.com",
+            role: MembershipRole.MEMBER,
+            attributes: [{ id: "attr-1", value: "Engineering" }],
+          },
+        ],
+        teamId: 1,
+      });
+
+      expect(result).toEqual({ numAttributesFailed: 1 });
+    });
+
+    it("should filter out attributes that are not valid for the team", async () => {
+      mockAttributeFindMany.mockResolvedValueOnce([{ id: "attr-1", type: "TEXT" }]);
+      mockUserFindMany.mockResolvedValueOnce([{ id: 10, email: "user@example.com" }]);
+      mockProcessUserAttributes.mockResolvedValueOnce({ success: true });
+
+      const result = await handleAttributeAssignment({
+        invitations: [
+          {
+            usernameOrEmail: "user@example.com",
+            role: MembershipRole.MEMBER,
+            attributes: [
+              { id: "attr-1", value: "Engineering" },
+              { id: "attr-invalid", value: "Should be filtered" },
+            ],
+          },
+        ],
+        teamId: 1,
+      });
+
+      expect(result).toEqual({ numAttributesFailed: 0 });
+      expect(mockProcessUserAttributes).toHaveBeenCalledWith(expect.anything(), 10, 1, [
+        expect.objectContaining({ id: "attr-1" }),
+      ]);
     });
   });
 });

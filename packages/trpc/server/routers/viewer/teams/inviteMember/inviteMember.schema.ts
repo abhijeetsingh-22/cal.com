@@ -48,7 +48,8 @@ export const ZInviteMemberInputSchema = z.object({
     )
     .refine(
       (value) => {
-        // Case when value is string or array of invitation objects {email: string, role: MembershipRole}
+        // Skip for single string (validated by transform) and object arrays (validated by their own schema).
+        // Only validate string arrays to ensure each element is a valid email.
         if (!Array.isArray(value) || (value.length > 0 && typeof value[0] === "object")) return true;
 
         return !value.some((email) => !emailSchema.safeParse(email).success);
