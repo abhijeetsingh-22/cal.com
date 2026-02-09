@@ -17,7 +17,7 @@ import {
   stripBOM,
 } from "@calcom/web/modules/users/lib/ImportMembersUtils";
 import { useSession } from "next-auth/react";
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import type { UserTableAction } from "./types";
 
@@ -42,6 +42,16 @@ interface PreviewTableProps {
 function PreviewTable({ parsedUsers, enabledAttributes }: PreviewTableProps) {
   const { t } = useLocale();
 
+  const attributeIdsWithValues = useMemo(() => {
+    const ids = new Set<string>();
+    for (const user of parsedUsers) {
+      for (const attr of user.attributes ?? []) {
+        ids.add(attr.id);
+      }
+    }
+    return ids;
+  }, [parsedUsers]);
+
   return (
     <div>
       <div className="scrollbar-thin mt-2 max-h-60 overflow-auto rounded-md border">
@@ -51,8 +61,7 @@ function PreviewTable({ parsedUsers, enabledAttributes }: PreviewTableProps) {
               <th className="min-w-[200px] px-3 py-2 text-left">{t("email")}</th>
               <th className="min-w-[100px] px-3 py-2 text-left">{t("role")}</th>
               {enabledAttributes?.map((attr) => {
-                const hasValues = parsedUsers.some((u) => u.attributes?.some((a) => a.id === attr.id));
-                if (!hasValues) return null;
+                if (!attributeIdsWithValues.has(attr.id)) return null;
                 return (
                   <th key={attr.id} className="min-w-[120px] px-3 py-2 text-left">
                     {attr.name}
@@ -71,8 +80,7 @@ function PreviewTable({ parsedUsers, enabledAttributes }: PreviewTableProps) {
                   </Badge>
                 </td>
                 {enabledAttributes?.map((attr) => {
-                  const hasValues = parsedUsers.some((u) => u.attributes?.some((a) => a.id === attr.id));
-                  if (!hasValues) return null;
+                  if (!attributeIdsWithValues.has(attr.id)) return null;
                   const userAttr = user.attributes?.find((a) => a.id === attr.id);
                   if (!userAttr) return <td key={attr.id} className="px-3 py-2.5" />;
 
@@ -209,7 +217,7 @@ export function ImportMembersModal(props: Props) {
 
   const handleSubmit = (): void => {
     if (parsedUsers.length === 0) return;
-    inviteMemberMutation.mutateAsync({
+    inviteMemberMutation.mutate({
       teamId: orgId,
       usernameOrEmail: parsedUsers.map((u) => ({
         email: u.email,
