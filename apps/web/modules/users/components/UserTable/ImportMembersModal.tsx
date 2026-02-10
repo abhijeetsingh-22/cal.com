@@ -52,6 +52,16 @@ function PreviewTable({ parsedUsers, enabledAttributes }: PreviewTableProps) {
     return ids;
   }, [parsedUsers]);
 
+  const optionLabelById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const attr of enabledAttributes ?? []) {
+      for (const opt of attr.options) {
+        map.set(opt.id, opt.value);
+      }
+    }
+    return map;
+  }, [enabledAttributes]);
+
   return (
     <div>
       <div className="scrollbar-thin mt-2 max-h-60 overflow-auto rounded-md border">
@@ -90,8 +100,7 @@ function PreviewTable({ parsedUsers, enabledAttributes }: PreviewTableProps) {
                   }
                   if (userAttr.options) {
                     for (const opt of userAttr.options) {
-                      const optionData = attr.options.find((o) => o.id === opt.value);
-                      let label = optionData?.value ?? opt.value;
+                      let label = optionLabelById.get(opt.value) ?? opt.value;
                       if (attr.isWeightsEnabled) {
                         label = `${label} ${opt.weight}%`;
                       }

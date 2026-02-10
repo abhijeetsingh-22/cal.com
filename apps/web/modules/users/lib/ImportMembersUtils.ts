@@ -55,7 +55,7 @@ export function parseCSVContent({
   defaultRole: MembershipRole;
   t: (key: string) => string;
 }): UserInvitation[] {
-  const lines = csvText.split("\n");
+  const lines = csvText.split(/\r?\n/);
   const headers = parseCSVRow(lines[0]);
   const emailIndex = headers.findIndex((h) => h.toLowerCase() === "members");
   const roleIndex = headers.findIndex((h) => h.toLowerCase() === "role");
@@ -80,17 +80,19 @@ export function parseCSVContent({
   }
 
   const users: UserInvitation[] = [];
+  const seenEmails = new Set<string>();
 
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i].trim();
     if (!line) continue;
 
     const columns = parseCSVRow(line);
-    const email = columns[emailIndex]?.trim();
+    const email = columns[emailIndex]?.trim()?.toLowerCase();
 
-    if (!email || !emailRegex.test(email)) {
+    if (!email || !emailRegex.test(email) || seenEmails.has(email)) {
       continue;
     }
+    seenEmails.add(email);
 
     let role = defaultRole;
     if (roleIndex !== -1 && columns[roleIndex]) {
@@ -107,6 +109,7 @@ export function parseCSVContent({
       if (!cellValue) continue;
 
       if (attribute.type === "TEXT" || attribute.type === "NUMBER") {
+        // Exported attribute values may include a default weight suffix e.g. "Engineering (100%)" — strip it for TEXT/NUMBER types
         const cleanValue = cellValue.endsWith(" (100%)") ? cellValue.slice(0, -7) : cellValue;
         parsedAttributes.push({
           id: attribute.id,
