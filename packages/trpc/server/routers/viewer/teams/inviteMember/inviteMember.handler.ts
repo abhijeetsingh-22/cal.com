@@ -23,8 +23,6 @@ import {
   getOrgState,
   getTeamOrThrow,
   getUniqueInvitationsOrThrowIfEmpty,
-  handleAttributeAssignment,
-  handleExistingMemberRoleUpdates,
   handleExistingUsersInvites,
   handleNewUsersInvites,
   INVITE_STATUS,
@@ -123,7 +121,6 @@ function buildInvitationsFromInput({
     return {
       usernameOrEmail: usernameOrEmail.email,
       role: usernameOrEmail.role,
-      attributes: usernameOrEmail.attributes,
     };
   });
 }
@@ -206,18 +203,12 @@ export const inviteMembersWithNoInviterPermissionCheck = async (
     (invitee) => invitee.canBeInvited === INVITE_STATUS.CAN_BE_INVITED
   );
 
-  // Existing members that can be updated (already members or have pending invitations)
-  const existingMembersToUpdate = existingUsersToBeInvited.filter(
-    (invitee) => invitee.canBeInvited === INVITE_STATUS.USER_ALREADY_INVITED_OR_MEMBER
-  );
-
   myLog.debug(
     "Notable variables:",
     safeStringify({
       uniqueInvitations,
       orgConnectInfoByUsernameOrEmail,
       invitableExistingUsers,
-      existingMembersToUpdate,
       existingUsersToBeInvited,
       invitationsForNewUsers,
     })
@@ -236,27 +227,9 @@ export const inviteMembersWithNoInviterPermissionCheck = async (
     });
   }
 
-  // Handle updates to existing members/pending invitations when in bulk import mode
-  let numExistingUsersUpdated = 0;
-  if (beSilentAboutErrors && existingMembersToUpdate.length) {
-    numExistingUsersUpdated = await handleExistingMemberRoleUpdates({
-      existingMembersToUpdate: existingMembersToUpdate.map((user) => ({
-        id: user.id,
-        email: user.email,
-        username: user.username,
-        newRole: user.newRole,
-      })),
-      teamId: team.id,
-    });
-  }
-
   const teamBillingServiceFactory = getTeamBillingServiceFactory();
   const teamBillingService = teamBillingServiceFactory.init(team);
   await teamBillingService.updateQuantity();
-
-  const { numAttributesFailed } = isTeamAnOrg
-    ? await handleAttributeAssignment({ invitations, teamId: team.id })
-    : { numAttributesFailed: 0 };
 
   return {
     // TODO: Better rename it to invitations only maybe?
@@ -265,8 +238,6 @@ export const inviteMembersWithNoInviterPermissionCheck = async (
         ? invitations[0].usernameOrEmail
         : invitations.map((invitation) => invitation.usernameOrEmail),
     numUsersInvited: invitableExistingUsers.length + invitationsForNewUsers.length,
-    numExistingUsersUpdated,
-    numAttributesFailed,
   };
 };
 

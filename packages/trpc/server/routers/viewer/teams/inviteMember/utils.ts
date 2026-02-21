@@ -24,7 +24,6 @@ import { MembershipRole } from "@calcom/prisma/enums";
 import { teamMetadataSchema } from "@calcom/prisma/zod-utils";
 import { TRPCError } from "@trpc/server";
 import type { TFunction } from "i18next";
-import { processUserAttributes } from "../../attributes/attributeUtils";
 import { isEmail } from "../util";
 import type { TeamWithParent } from "./types";
 
@@ -43,11 +42,6 @@ export type UserWithMembership = Invitee & {
 export type Invitation = {
   usernameOrEmail: string;
   role: MembershipRole;
-  attributes?: Array<{
-    id: string;
-    value?: string;
-    options?: Array<{ value: string; weight?: number }>;
-  }>;
 };
 
 type InvitableExistingUser = UserWithMembership & {
@@ -798,173 +792,6 @@ export const sendExistingUserTeamInviteEmails = async ({
 
   await sendEmails(sendEmailsPromises);
 };
-
-export async function handleExistingMemberRoleUpdates({
-  existingMembersToUpdate,
-  teamId,
-}: {
-  existingMembersToUpdate: Array<{
-    id: number;
-    email: string;
-    username: string | null;
-    newRole: MembershipRole;
-  }>;
-  teamId: number;
-}) {
-  const myLog = log.getSubLogger({ prefix: ["handleExistingMemberRoleUpdates"] });
-
-  myLog.debug(
-    "Updating existing members",
-    safeStringify({
-      existingMembersToUpdate,
-      teamId,
-    })
-  );
-
-  if (existingMembersToUpdate.length === 0) {
-    return 0;
-  }
-
-  const memberIds = existingMembersToUpdate.map((m) => m.id);
-
-  const existingMemberships = await prisma.membership.findMany({
-    where: {
-      userId: { in: memberIds },
-      teamId,
-    },
-    select: {
-      userId: true,
-      role: true,
-    },
-  });
-
-  const currentRoleByUserId = new Map(existingMemberships.map((m) => [m.userId, m.role]));
-
-  const membersToUpdate = existingMembersToUpdate.filter((member) => {
-    const currentRole = currentRoleByUserId.get(member.id);
-    return currentRole && currentRole !== member.newRole;
-  });
-
-  if (membersToUpdate.length === 0) {
-    myLog.debug("No role changes needed");
-    return 0;
-  }
-
-  const membersByTargetRole = new Map<MembershipRole, number[]>();
-  for (const member of membersToUpdate) {
-    const existing = membersByTargetRole.get(member.newRole);
-    if (existing) {
-      existing.push(member.id);
-    } else {
-      membersByTargetRole.set(member.newRole, [member.id]);
-    }
-  }
-
-  await prisma.$transaction(
-    Array.from(membersByTargetRole.entries()).map(([role, userIds]) =>
-      prisma.membership.updateMany({
-        where: {
-          userId: { in: userIds },
-          teamId,
-        },
-        data: {
-          role,
-        },
-      })
-    )
-  );
-
-  myLog.debug(`Successfully updated ${membersToUpdate.length} existing members`);
-
-  return membersToUpdate.length;
-}
-
-export async function handleAttributeAssignment({
-  invitations,
-  teamId,
-}: {
-  invitations: Invitation[];
-  teamId: number;
-}): Promise<{ numAttributesFailed: number }> {
-  const myLog = log.getSubLogger({ prefix: ["handleAttributeAssignment"] });
-
-  const invitationsWithAttributes = invitations.filter((inv) => inv.attributes?.length);
-
-  if (invitationsWithAttributes.length === 0) {
-    return { numAttributesFailed: 0 };
-  }
-
-  const allAttributeIds = Array.from(
-    new Set(invitationsWithAttributes.flatMap((inv) => (inv.attributes ?? []).map((a) => a.id)))
-  );
-
-  const validAttributes = await prisma.attribute.findMany({
-    where: {
-      id: { in: allAttributeIds },
-      teamId,
-    },
-    select: {
-      id: true,
-      type: true,
-    },
-  });
-
-  const validAttributeMap = new Map(validAttributes.map((a) => [a.id, a.type]));
-
-  const invitationEmails = invitationsWithAttributes.map((inv) => inv.usernameOrEmail);
-  const users = await prisma.user.findMany({
-    where: {
-      email: { in: invitationEmails },
-    },
-    select: {
-      id: true,
-      email: true,
-    },
-  });
-
-  const emailToUserId = new Map(users.map((u) => [u.email, u.id]));
-
-  const results = await Promise.all(
-    invitationsWithAttributes.map(async (invitation) => {
-      const userId = emailToUserId.get(invitation.usernameOrEmail);
-      if (!userId) {
-        myLog.warn(`Cannot assign attributes: user not found for ${invitation.usernameOrEmail}`);
-        return { success: false };
-      }
-
-      const validatedAttributes = (invitation.attributes ?? [])
-        .filter((attr) => validAttributeMap.has(attr.id))
-        .map((attr) => ({
-          ...attr,
-          type: validAttributeMap.get(attr.id),
-        }));
-
-      if (validatedAttributes.length === 0) {
-        return { success: true };
-      }
-
-      try {
-        const result = await prisma.$transaction(async (tx) => {
-          return processUserAttributes(tx, userId, teamId, validatedAttributes);
-        });
-        return result;
-      } catch (error) {
-        myLog.warn(`Failed to assign attributes for user ${invitation.usernameOrEmail}`, error);
-        return { success: false };
-      }
-    })
-  );
-
-  let numAttributesFailed = 0;
-
-  for (const result of results) {
-    if (!result.success) {
-      numAttributesFailed++;
-    }
-  }
-
-  return { numAttributesFailed };
-}
 
 export async function handleExistingUsersInvites({
   invitableExistingUsers,

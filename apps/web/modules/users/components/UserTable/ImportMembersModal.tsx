@@ -174,7 +174,7 @@ export function ImportMembersModal(props: Props) {
 
   const { data: attributes } = trpc.viewer.attributes.list.useQuery();
   const enabledAttributes = attributes?.filter((attr) => attr.enabled);
-  const inviteMemberMutation = trpc.viewer.teams.inviteMember.useMutation({
+  const importMembersMutation = trpc.viewer.teams.importMembers.useMutation({
     onSuccess: (data) => {
       props.dispatch({ type: "CLOSE_MODAL" });
       utils.viewer.organizations.listMembers.invalidate();
@@ -209,7 +209,9 @@ export function ImportMembersModal(props: Props) {
     const reader = new FileReader();
     reader.onload = (e): void => {
       try {
-        const csvText = stripBOM(e?.target?.result as string);
+        const rawResult = e?.target?.result;
+        if (typeof rawResult !== "string") return;
+        const csvText = stripBOM(rawResult);
         const users = parseCSVContent({
           csvText,
           enabledAttributes,
@@ -221,20 +223,22 @@ export function ImportMembersModal(props: Props) {
         setParseError((error as Error).message);
       }
     };
+    reader.onerror = (): void => {
+      setParseError(t("error_reading_file"));
+    };
     reader.readAsText(files[0]);
   };
 
   const handleSubmit = (): void => {
     if (parsedUsers.length === 0) return;
-    inviteMemberMutation.mutate({
+    importMembersMutation.mutate({
       teamId: orgId,
-      usernameOrEmail: parsedUsers.map((u) => ({
+      members: parsedUsers.map((u) => ({
         email: u.email,
         role: u.role,
         ...(u.attributes?.length ? { attributes: u.attributes } : {}),
       })),
       language: i18n.language,
-      isPlatform: platformUser?.organization.isPlatform,
       creationSource: CreationSource.WEBAPP,
     });
   };
@@ -322,7 +326,7 @@ export function ImportMembersModal(props: Props) {
             </Button>
             <Button
               type="submit"
-              loading={inviteMemberMutation.isPending}
+              loading={importMembersMutation.isPending}
               disabled={parsedUsers.length === 0}>
               {t("send_invite")}
             </Button>

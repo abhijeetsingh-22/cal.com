@@ -174,29 +174,20 @@ export function parseCSVContent({
 export function showImportSuccessToast(
   data: {
     numUsersInvited: number;
-    numExistingUsersUpdated?: number;
-    numAttributesFailed?: number;
+    numUsersUpdated: number;
+    numUpdatesFailed: number;
   },
   t: (key: string, params?: Record<string, unknown>) => string
 ) {
-  if (data.numAttributesFailed && data.numAttributesFailed > 0) {
-    showToast(
-      t("import_members_invited_updated_failed", {
-        invited: data.numUsersInvited,
-        updated: data.numExistingUsersUpdated ?? 0,
-        failed: data.numAttributesFailed,
-      }),
-      "warning"
-    );
-  } else if (data.numExistingUsersUpdated && data.numExistingUsersUpdated > 0) {
-    showToast(
-      t("import_members_invited_updated", {
-        invited: data.numUsersInvited,
-        updated: data.numExistingUsersUpdated,
-      }),
-      "success"
-    );
+  const parts: string[] = [];
+  if (data.numUsersInvited > 0) parts.push(t("import_result_invited", { count: data.numUsersInvited }));
+  if (data.numUsersUpdated > 0) parts.push(t("import_result_updated", { count: data.numUsersUpdated }));
+  if (data.numUpdatesFailed > 0)
+    parts.push(t("import_result_update_failed", { count: data.numUpdatesFailed }));
+
+  if (parts.length === 0) {
+    showToast(t("import_all_up_to_date"), "success");
   } else {
-    showToast(t("import_members_invited", { invited: data.numUsersInvited }), "success");
+    showToast(parts.join(", "), data.numUpdatesFailed > 0 ? "warning" : "success");
   }
 }

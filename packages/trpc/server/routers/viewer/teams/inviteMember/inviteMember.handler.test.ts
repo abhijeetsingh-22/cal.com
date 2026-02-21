@@ -235,8 +235,6 @@ describe("inviteMemberHandler", () => {
         expect(result).toEqual({
           usernameOrEmail: input.usernameOrEmail,
           numUsersInvited: 2,
-          numExistingUsersUpdated: 0,
-          numAttributesFailed: 0,
         });
       });
     });
@@ -475,8 +473,6 @@ describe("inviteMemberHandler", () => {
       expect(result).toEqual({
         usernameOrEmail: userToBeInvited.email,
         numUsersInvited: 0,
-        numExistingUsersUpdated: 0,
-        numAttributesFailed: 0,
       });
 
       // Verify that handleNewUsersInvites and handleExistingUsersInvites were not called
@@ -550,8 +546,6 @@ describe("inviteMemberHandler", () => {
       expect(result).toEqual({
         usernameOrEmail: [existingMember.email, newUser.email],
         numUsersInvited: 1,
-        numExistingUsersUpdated: 0,
-        numAttributesFailed: 0,
       });
 
       // Verify that only new user was invited

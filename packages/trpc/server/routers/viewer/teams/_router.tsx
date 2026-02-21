@@ -17,6 +17,7 @@ import { ZGetSubscriptionStatusInputSchema } from "./getSubscriptionStatus.schem
 import { ZGetUserConnectedAppsInputSchema } from "./getUserConnectedApps.schema";
 import { ZHasActiveTeamPlanInputSchema } from "./hasActiveTeamPlan.schema";
 import { ZHasEditPermissionForUserSchema } from "./hasEditPermissionForUser.schema";
+import { ZImportMembersInputSchema } from "./importMembers/importMembers.schema";
 import { ZInviteMemberInputSchema } from "./inviteMember/inviteMember.schema";
 import { ZInviteMemberByTokenSchemaInputSchema } from "./inviteMemberByToken.schema";
 import { ZLegacyListMembersInputSchema } from "./legacyListMembers.schema";
@@ -76,6 +77,10 @@ export const viewerTeamsRouter = router({
   }),
   inviteMember: authedProcedure.input(ZInviteMemberInputSchema).mutation(async (opts) => {
     const { default: handler } = await import("./inviteMember/inviteMember.handler");
+    return handler(opts);
+  }),
+  importMembers: authedProcedure.input(ZImportMembersInputSchema).mutation(async (opts) => {
+    const { default: handler } = await import("./importMembers/importMembers.handler");
     return handler(opts);
   }),
   acceptOrLeave: authedProcedure.input(ZAcceptOrLeaveInputSchema).mutation(async (opts) => {
