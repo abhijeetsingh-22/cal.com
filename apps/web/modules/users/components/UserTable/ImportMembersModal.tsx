@@ -271,7 +271,7 @@ export function ImportMembersModal(props: Props) {
                       {t("default_role_for_imported_users")}
                     </Label>
                     <Select
-                      id="role"
+                      id="defaultRole"
                       defaultValue={roleOptions[0]}
                       options={roleOptions}
                       onChange={(val) => {
