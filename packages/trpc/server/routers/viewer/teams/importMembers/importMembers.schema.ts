@@ -9,14 +9,16 @@ export const ZImportMembersInputSchema = z.object({
   members: z
     .array(
       z.object({
-        email: emailSchema,
+        email: z
+          .string()
+          .transform((s) => s.trim().toLowerCase())
+          .pipe(emailSchema),
         role: z.nativeEnum(MembershipRole),
         attributes: attributeSchema.array().optional(),
       })
     )
     .min(1)
-    .max(MAX_NB_INVITES)
-    .transform((members) => members.map((m) => ({ ...m, email: m.email.trim().toLowerCase() }))),
+    .max(MAX_NB_INVITES),
   language: z.string(),
   creationSource: z.nativeEnum(CreationSource),
 });

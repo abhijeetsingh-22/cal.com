@@ -230,7 +230,7 @@ export function ImportMembersModal(props: Props) {
   };
 
   const handleSubmit = (): void => {
-    if (parsedUsers.length === 0) return;
+    if (parsedUsers.length === 0 || importMembersMutation.isPending) return;
     importMembersMutation.mutate({
       teamId: orgId,
       members: parsedUsers.map((u) => ({
@@ -297,7 +297,12 @@ export function ImportMembersModal(props: Props) {
                   color="secondary"
                   className="w-full justify-center stroke-2"
                   StartIcon="paperclip"
-                  onClick={() => fileInputRef.current?.click()}>
+                  onClick={() => {
+                    if (fileInputRef.current) {
+                      fileInputRef.current.value = "";
+                    }
+                    fileInputRef.current?.click();
+                  }}>
                   {t("upload_csv_file")}
                 </Button>
                 <input
@@ -327,7 +332,7 @@ export function ImportMembersModal(props: Props) {
             <Button
               type="submit"
               loading={importMembersMutation.isPending}
-              disabled={parsedUsers.length === 0}>
+              disabled={parsedUsers.length === 0 || importMembersMutation.isPending}>
               {t("send_invite")}
             </Button>
           </DialogFooter>

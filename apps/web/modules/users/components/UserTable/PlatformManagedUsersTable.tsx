@@ -262,6 +262,8 @@ function UserListTableContent({ oAuthClientId }: PlatformManagedUsersTableProps)
         return { ...state, impersonateMember: action.payload };
       case "INVITE_MEMBER":
         return { ...state, inviteMember: action.payload };
+      case "IMPORT_MEMBERS":
+        return { ...state, importMembers: action.payload };
       case "EDIT_USER_SHEET":
         return { ...state, editSheet: action.payload };
       case "CLOSE_MODAL":
@@ -270,6 +272,7 @@ function UserListTableContent({ oAuthClientId }: PlatformManagedUsersTableProps)
           changeMemberRole: { showModal: false },
           deleteMember: { showModal: false },
           impersonateMember: { showModal: false },
+          importMembers: { showModal: false },
           inviteMember: { showModal: false },
           editSheet: { showModal: false },
         };

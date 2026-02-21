@@ -722,7 +722,7 @@ function UserListTableContent({
       {ctaContainerRef.current &&
         createPortal(
           <div className="flex items-center gap-2">
-            {adminOrOwner && (
+            {(permissions?.canInvite ?? adminOrOwner) && (
               <DataTableToolbar.CTA
                 type="button"
                 color="secondary"

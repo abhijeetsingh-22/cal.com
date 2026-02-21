@@ -109,7 +109,8 @@ export async function handleExistingMemberRoleUpdates({
   myLog.debug(
     "Updating existing members",
     safeStringify({
-      existingMembersToUpdate,
+      userIds: existingMembersToUpdate.map((m) => m.id),
+      count: existingMembersToUpdate.length,
       teamId,
     })
   );
@@ -221,7 +222,7 @@ export async function handleAttributeAssignment({
     invitationsWithAttributes.map(async (invitation) => {
       const userId = emailToUserId.get(invitation.usernameOrEmail);
       if (!userId) {
-        myLog.warn(`Cannot assign attributes: user not found for ${invitation.usernameOrEmail}`);
+        myLog.warn(`Cannot assign attributes: user not found for invitation in team ${teamId}`);
         return { success: false };
       }
 
@@ -242,7 +243,7 @@ export async function handleAttributeAssignment({
         });
         return result;
       } catch (error) {
-        myLog.warn(`Failed to assign attributes for user ${invitation.usernameOrEmail}`, error);
+        myLog.warn(`Failed to assign attributes for userId ${userId} in team ${teamId}`, error);
         return { success: false };
       }
     })
