@@ -164,7 +164,6 @@ describe("importMembers utils", () => {
       expect(result).toEqual([]);
       expect(mockMembershipUpdateMany).not.toHaveBeenCalled();
     });
-
   });
 
   describe("handleAttributeAssignment", () => {
@@ -353,7 +352,7 @@ describe("importMembers utils", () => {
       mockGetTranslation.mockReset().mockResolvedValue((key: string) => key);
     });
 
-    it("should skip billing when no new seats will be added", async () => {
+    it("should skip billing check when no new seats will be added (only attribute / role updates)", async () => {
       await ensureBillingAllowsImport({
         existingUsers: [
           { canBeInvited: INVITE_STATUS.USER_ALREADY_INVITED_OR_MEMBER },
