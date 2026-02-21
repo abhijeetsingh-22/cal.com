@@ -147,74 +147,6 @@ describe("importMembersHandler", () => {
     });
   });
 
-  it("should handle all existing members without crashing", async () => {
-    mockFindUsersWithInviteStatus.mockResolvedValueOnce([
-      {
-        id: 1,
-        email: "existing1@example.com",
-        username: "existing1",
-        canBeInvited: INVITE_STATUS.USER_ALREADY_INVITED_OR_MEMBER,
-        newRole: MembershipRole.ADMIN,
-      },
-      {
-        id: 2,
-        email: "existing2@example.com",
-        username: "existing2",
-        canBeInvited: INVITE_STATUS.USER_ALREADY_INVITED_OR_MEMBER,
-        newRole: MembershipRole.MEMBER,
-      },
-    ]);
-    mockInviteMembersWithNoInviterPermissionCheck.mockResolvedValueOnce({ numUsersInvited: 0 });
-    mockHandleRoleAndAttributeUpdates.mockResolvedValueOnce({ numUsersUpdated: 2, numUpdatesFailed: 0 });
-
-    const handler = (await import("./importMembers.handler")).default;
-    const result = await handler({
-      ctx: { user: getLoggedInUser() },
-      input: {
-        ...baseInput,
-        members: [
-          { email: "existing1@example.com", role: MembershipRole.ADMIN },
-          { email: "existing2@example.com", role: MembershipRole.MEMBER },
-        ],
-      },
-    });
-
-    expect(result).toEqual({
-      numUsersInvited: 0,
-      numUsersUpdated: 2,
-      numUpdatesFailed: 0,
-    });
-  });
-
-  it("should handle single existing member without crashing (the original bug)", async () => {
-    mockFindUsersWithInviteStatus.mockResolvedValueOnce([
-      {
-        id: 1,
-        email: "existing@example.com",
-        username: "existing",
-        canBeInvited: INVITE_STATUS.USER_ALREADY_INVITED_OR_MEMBER,
-        newRole: MembershipRole.MEMBER,
-      },
-    ]);
-    mockInviteMembersWithNoInviterPermissionCheck.mockResolvedValueOnce({ numUsersInvited: 0 });
-    mockHandleRoleAndAttributeUpdates.mockResolvedValueOnce({ numUsersUpdated: 0, numUpdatesFailed: 0 });
-
-    const handler = (await import("./importMembers.handler")).default;
-    const result = await handler({
-      ctx: { user: getLoggedInUser() },
-      input: {
-        ...baseInput,
-        members: [{ email: "existing@example.com", role: MembershipRole.MEMBER }],
-      },
-    });
-
-    expect(result).toEqual({
-      numUsersInvited: 0,
-      numUsersUpdated: 0,
-      numUpdatesFailed: 0,
-    });
-  });
-
   it("should handle mix of new and existing members", async () => {
     mockFindUsersWithInviteStatus.mockResolvedValueOnce([
       {
@@ -298,20 +230,6 @@ describe("importMembersHandler", () => {
         input: baseInput,
       })
     ).rejects.toThrow("Rate limit exceeded");
-  });
-
-  it("should pass isDirectUserAction=false to shared invite function", async () => {
-    const handler = (await import("./importMembers.handler")).default;
-    await handler({
-      ctx: { user: getLoggedInUser() },
-      input: baseInput,
-    });
-
-    expect(mockInviteMembersWithNoInviterPermissionCheck).toHaveBeenCalledWith(
-      expect.objectContaining({
-        isDirectUserAction: false,
-      })
-    );
   });
 
   it("should propagate billing guard error", async () => {

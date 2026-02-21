@@ -20,64 +20,6 @@ export type ImportInvitation = Invitation & {
   }>;
 };
 
-/**
- * Checks whether any invitation will result in a new billable seat.
- * New seats are added when a user doesn't exist in DB at all, or exists
- * but isn't yet a member of the target team/org (CAN_BE_INVITED).
- */
-export function willAddNewSeats({
-  existingUsers,
-  numUniqueInvitations,
-}: {
-  existingUsers: Array<{ canBeInvited: INVITE_STATUS }>;
-  numUniqueInvitations: number;
-}): boolean {
-  // Fewer DB matches than invitations means some users don't exist yet
-  return (
-    existingUsers.length < numUniqueInvitations ||
-    existingUsers.some((u) => u.canBeInvited === INVITE_STATUS.CAN_BE_INVITED)
-  );
-}
-
-/**
- * Checks whether any invitation actually grants OWNER privilege —
- * i.e. a new user invited as OWNER, an existing non-member added as OWNER,
- * or an existing member whose role is being upgraded to OWNER.
- * Re-importing an existing OWNER with the same role is a no-op and does not count.
- */
-export function isGrantingOwnerRole({
-  existingUsers,
-  uniqueInvitations,
-  teamId,
-}: {
-  existingUsers: Array<{
-    email: string;
-    canBeInvited: INVITE_STATUS;
-    teams?: Array<Pick<Membership, "teamId" | "role">>;
-  }>;
-  uniqueInvitations: Array<Pick<Invitation, "usernameOrEmail" | "role">>;
-  teamId: number;
-}): boolean {
-  const existingUsersByEmail = new Map(existingUsers.map((u) => [u.email, u]));
-
-  return uniqueInvitations.some((inv) => {
-    if (inv.role !== MembershipRole.OWNER) return false;
-
-    const existingUser = existingUsersByEmail.get(inv.usernameOrEmail);
-
-    if (!existingUser) return true;
-
-    if (existingUser.canBeInvited === INVITE_STATUS.CAN_BE_INVITED) return true;
-
-    if (existingUser.canBeInvited === INVITE_STATUS.USER_ALREADY_INVITED_OR_MEMBER) {
-      const currentMembership = existingUser.teams?.find((t) => t.teamId === teamId);
-      return currentMembership?.role !== MembershipRole.OWNER;
-    }
-
-    return false;
-  });
-}
-
 export async function ensureBillingAllowsImport({
   existingUsers,
   uniqueInvitations,
@@ -89,7 +31,10 @@ export async function ensureBillingAllowsImport({
   team: { id: number; parentId: number | null };
   language: string;
 }): Promise<void> {
-  if (!willAddNewSeats({ existingUsers, numUniqueInvitations: uniqueInvitations.length })) return;
+  const addsNewSeats =
+    existingUsers.length < uniqueInvitations.length ||
+    existingUsers.some((u) => u.canBeInvited === INVITE_STATUS.CAN_BE_INVITED);
+  if (!addsNewSeats) return;
 
   const dueInvoiceService = new DueInvoiceService();
   const canInvite = await dueInvoiceService.canInviteToTeam({
@@ -127,7 +72,21 @@ export async function ensureCanGrantOwnerRole({
   inviterId: number;
 }): Promise<void> {
   if (!isTeamAnOrg) return;
-  if (!isGrantingOwnerRole({ existingUsers, uniqueInvitations, teamId })) return;
+
+  const existingUsersByEmail = new Map(existingUsers.map((u) => [u.email, u]));
+  const grantsOwner = uniqueInvitations.some((inv) => {
+    if (inv.role !== MembershipRole.OWNER) return false;
+
+    const existingUser = existingUsersByEmail.get(inv.usernameOrEmail);
+    if (!existingUser) return true;
+    if (existingUser.canBeInvited === INVITE_STATUS.CAN_BE_INVITED) return true;
+    if (existingUser.canBeInvited === INVITE_STATUS.USER_ALREADY_INVITED_OR_MEMBER) {
+      const currentMembership = existingUser.teams?.find((t) => t.teamId === teamId);
+      return currentMembership?.role !== MembershipRole.OWNER;
+    }
+    return false;
+  });
+  if (!grantsOwner) return;
 
   const isInviterOrgOwner = await isOrganisationOwner(inviterId, teamId);
   if (!isInviterOrgOwner) throw new TRPCError({ code: "UNAUTHORIZED" });

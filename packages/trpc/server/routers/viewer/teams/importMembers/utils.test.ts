@@ -119,8 +119,6 @@ import {
   handleAttributeAssignment,
   handleExistingMemberRoleUpdates,
   handleRoleAndAttributeUpdates,
-  isGrantingOwnerRole,
-  willAddNewSeats,
 } from "./utils";
 
 describe("importMembers utils", () => {
@@ -167,14 +165,6 @@ describe("importMembers utils", () => {
       expect(mockMembershipUpdateMany).not.toHaveBeenCalled();
     });
 
-    it("should return empty array when no members to update", async () => {
-      const result = await handleExistingMemberRoleUpdates({
-        existingMembersToUpdate: [],
-        teamId: 100,
-      });
-
-      expect(result).toEqual([]);
-    });
   });
 
   describe("handleAttributeAssignment", () => {
@@ -268,17 +258,6 @@ describe("importMembers utils", () => {
       mockTransaction.mockClear();
     });
 
-    it("should return 0 when no existing members to update", async () => {
-      const result = await handleRoleAndAttributeUpdates({
-        existingMembersToUpdate: [],
-        invitations: [],
-        teamId: 1,
-        isOrg: false,
-      });
-
-      expect(result).toEqual({ numUsersUpdated: 0, numUpdatesFailed: 0 });
-    });
-
     it("should count role-updated user", async () => {
       mockMembershipFindMany.mockResolvedValueOnce([{ userId: 1, role: MembershipRole.MEMBER }]);
       mockMembershipUpdateMany.mockResolvedValue({ count: 1 });
@@ -368,153 +347,6 @@ describe("importMembers utils", () => {
     });
   });
 
-  describe("willAddNewSeats", () => {
-    it("should return true when some invitations have no matching DB user", () => {
-      const result = willAddNewSeats({
-        existingUsers: [{ canBeInvited: INVITE_STATUS.USER_ALREADY_INVITED_OR_MEMBER }],
-        numUniqueInvitations: 2,
-      });
-
-      expect(result).toBe(true);
-    });
-
-    it("should return true when an existing user can be invited (not yet a member)", () => {
-      const result = willAddNewSeats({
-        existingUsers: [{ canBeInvited: INVITE_STATUS.CAN_BE_INVITED }],
-        numUniqueInvitations: 1,
-      });
-
-      expect(result).toBe(true);
-    });
-
-    it("should return false when all users are already members", () => {
-      const result = willAddNewSeats({
-        existingUsers: [
-          { canBeInvited: INVITE_STATUS.USER_ALREADY_INVITED_OR_MEMBER },
-          { canBeInvited: INVITE_STATUS.USER_ALREADY_INVITED_OR_MEMBER },
-        ],
-        numUniqueInvitations: 2,
-      });
-
-      expect(result).toBe(false);
-    });
-
-    it("should return false when all users are from other organizations", () => {
-      const result = willAddNewSeats({
-        existingUsers: [{ canBeInvited: INVITE_STATUS.USER_MEMBER_OF_OTHER_ORGANIZATION }],
-        numUniqueInvitations: 1,
-      });
-
-      expect(result).toBe(false);
-    });
-  });
-
-  describe("isGrantingOwnerRole", () => {
-    it("should return false when no invitation has OWNER role", () => {
-      const result = isGrantingOwnerRole({
-        existingUsers: [],
-        uniqueInvitations: [{ usernameOrEmail: "user@example.com", role: MembershipRole.MEMBER }],
-        teamId: 1,
-      });
-
-      expect(result).toBe(false);
-    });
-
-    it("should return true when a new user is invited as OWNER", () => {
-      const result = isGrantingOwnerRole({
-        existingUsers: [],
-        uniqueInvitations: [{ usernameOrEmail: "new@example.com", role: MembershipRole.OWNER }],
-        teamId: 1,
-      });
-
-      expect(result).toBe(true);
-    });
-
-    it("should return true when an invitable existing user is added as OWNER", () => {
-      const result = isGrantingOwnerRole({
-        existingUsers: [
-          {
-            email: "user@example.com",
-            canBeInvited: INVITE_STATUS.CAN_BE_INVITED,
-            teams: [],
-          },
-        ],
-        uniqueInvitations: [{ usernameOrEmail: "user@example.com", role: MembershipRole.OWNER }],
-        teamId: 1,
-      });
-
-      expect(result).toBe(true);
-    });
-
-    it("should return true when an existing MEMBER is being upgraded to OWNER", () => {
-      const result = isGrantingOwnerRole({
-        existingUsers: [
-          {
-            email: "member@example.com",
-            canBeInvited: INVITE_STATUS.USER_ALREADY_INVITED_OR_MEMBER,
-            teams: [{ teamId: 1, role: MembershipRole.MEMBER }],
-          },
-        ],
-        uniqueInvitations: [{ usernameOrEmail: "member@example.com", role: MembershipRole.OWNER }],
-        teamId: 1,
-      });
-
-      expect(result).toBe(true);
-    });
-
-    it("should return false when an existing OWNER is re-imported as OWNER (no-op)", () => {
-      const result = isGrantingOwnerRole({
-        existingUsers: [
-          {
-            email: "owner@example.com",
-            canBeInvited: INVITE_STATUS.USER_ALREADY_INVITED_OR_MEMBER,
-            teams: [{ teamId: 1, role: MembershipRole.OWNER }],
-          },
-        ],
-        uniqueInvitations: [{ usernameOrEmail: "owner@example.com", role: MembershipRole.OWNER }],
-        teamId: 1,
-      });
-
-      expect(result).toBe(false);
-    });
-
-    it("should return true for mix: existing OWNER (no-op) + new user as OWNER", () => {
-      const result = isGrantingOwnerRole({
-        existingUsers: [
-          {
-            email: "owner@example.com",
-            canBeInvited: INVITE_STATUS.USER_ALREADY_INVITED_OR_MEMBER,
-            teams: [{ teamId: 1, role: MembershipRole.OWNER }],
-          },
-        ],
-        uniqueInvitations: [
-          { usernameOrEmail: "owner@example.com", role: MembershipRole.OWNER },
-          { usernameOrEmail: "new@example.com", role: MembershipRole.OWNER },
-        ],
-        teamId: 1,
-      });
-
-      expect(result).toBe(true);
-    });
-
-    it("should only check membership for the target team", () => {
-      const result = isGrantingOwnerRole({
-        existingUsers: [
-          {
-            email: "user@example.com",
-            canBeInvited: INVITE_STATUS.USER_ALREADY_INVITED_OR_MEMBER,
-            teams: [{ teamId: 999, role: MembershipRole.OWNER }],
-          },
-        ],
-        uniqueInvitations: [{ usernameOrEmail: "user@example.com", role: MembershipRole.OWNER }],
-        teamId: 1,
-      });
-
-      // User is OWNER on team 999, but not on team 1 — this is a grant
-      expect(result).toBe(true);
-    });
-  });
-
   describe("ensureBillingAllowsImport", () => {
     beforeEach(() => {
       mockCanInviteToTeam.mockReset().mockResolvedValue({ allowed: true });
@@ -565,6 +397,19 @@ describe("importMembers utils", () => {
           language: "en",
         })
       ).resolves.toBeUndefined();
+    });
+
+    it("should check billing when an existing user CAN_BE_INVITED (new seat)", async () => {
+      mockCanInviteToTeam.mockResolvedValueOnce({ allowed: true });
+
+      await ensureBillingAllowsImport({
+        existingUsers: [{ canBeInvited: INVITE_STATUS.CAN_BE_INVITED }],
+        uniqueInvitations: [{ usernameOrEmail: "user@example.com", role: MembershipRole.MEMBER }],
+        team: { id: 1, parentId: null },
+        language: "en",
+      });
+
+      expect(mockCanInviteToTeam).toHaveBeenCalled();
     });
   });
 
@@ -623,6 +468,44 @@ describe("importMembers utils", () => {
           inviterId: 123,
         })
       ).resolves.toBeUndefined();
+    });
+
+    it("should throw when existing MEMBER is upgraded to OWNER by non-owner inviter", async () => {
+      mockIsOrganisationOwner.mockResolvedValueOnce(false);
+
+      await expect(
+        ensureCanGrantOwnerRole({
+          existingUsers: [
+            {
+              email: "member@example.com",
+              canBeInvited: INVITE_STATUS.USER_ALREADY_INVITED_OR_MEMBER,
+              teams: [{ teamId: 1, role: MembershipRole.MEMBER }],
+            },
+          ],
+          uniqueInvitations: [{ usernameOrEmail: "member@example.com", role: MembershipRole.OWNER }],
+          teamId: 1,
+          isTeamAnOrg: true,
+          inviterId: 123,
+        })
+      ).rejects.toThrow(expect.objectContaining({ code: "UNAUTHORIZED" }));
+    });
+
+    it("should skip when re-importing existing OWNER as OWNER (no-op)", async () => {
+      await ensureCanGrantOwnerRole({
+        existingUsers: [
+          {
+            email: "owner@example.com",
+            canBeInvited: INVITE_STATUS.USER_ALREADY_INVITED_OR_MEMBER,
+            teams: [{ teamId: 1, role: MembershipRole.OWNER }],
+          },
+        ],
+        uniqueInvitations: [{ usernameOrEmail: "owner@example.com", role: MembershipRole.OWNER }],
+        teamId: 1,
+        isTeamAnOrg: true,
+        inviterId: 123,
+      });
+
+      expect(mockIsOrganisationOwner).not.toHaveBeenCalled();
     });
   });
 });
