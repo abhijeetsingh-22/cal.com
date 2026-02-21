@@ -1,8 +1,9 @@
+import { z } from "zod";
+
 import { MAX_NB_INVITES } from "@calcom/lib/constants";
 import { emailSchema } from "@calcom/lib/emailSchema";
-import { CreationSource, MembershipRole } from "@calcom/prisma/enums";
-import { attributeSchema } from "@calcom/trpc/server/routers/viewer/attributes/assignUserToAttribute.schema";
-import { z } from "zod";
+import { MembershipRole } from "@calcom/prisma/enums";
+import { CreationSource } from "@calcom/prisma/enums";
 
 export const ZInviteMemberInputSchema = z.object({
   teamId: z.number(),
@@ -15,7 +16,6 @@ export const ZInviteMemberInputSchema = z.object({
           z.object({
             email: emailSchema,
             role: z.nativeEnum(MembershipRole),
-            attributes: attributeSchema.array().optional(),
           }),
         ])
         .array(),
@@ -48,11 +48,10 @@ export const ZInviteMemberInputSchema = z.object({
     )
     .refine(
       (value) => {
-        // Skip for single string (validated by transform) and object arrays (validated by their own schema).
-        // Only validate string arrays to ensure each element is a valid email.
-        if (!Array.isArray(value) || (value.length > 0 && typeof value[0] === "object")) return true;
-
-        return !value.some((email) => !emailSchema.safeParse(email).success);
+        if (Array.isArray(value)) {
+          return !value.some((email) => !emailSchema.safeParse(email).success);
+        }
+        return true;
       },
       { message: "Bulk invitations are restricted to email addresses only." }
     ),

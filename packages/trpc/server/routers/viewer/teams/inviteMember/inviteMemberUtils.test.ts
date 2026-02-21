@@ -2,6 +2,7 @@ import { PermissionCheckService } from "@calcom/features/pbac/services/permissio
 import { CreationSource, MembershipRole } from "@calcom/prisma/enums";
 import { TRPCError } from "@trpc/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
 import type { TeamWithParent } from "./types";
 import type { UserWithMembership } from "./utils";
 import {
@@ -17,30 +18,12 @@ import {
   INVITE_STATUS,
 } from "./utils";
 
-const {
-  mockCreateMany,
-  mockUserCreate,
-  mockUserFindMany,
-  mockMembershipCreate,
-  mockMembershipFindMany,
-  mockMembershipUpdateMany,
-  mockAttributeFindMany,
-  mockProcessUserAttributes,
-  mockTransaction,
-} = vi.hoisted(() => {
+const { mockCreateMany, mockUserCreate, mockMembershipCreate, mockTransaction } = vi.hoisted(() => {
   const mockCreateManyFn = vi.fn();
   const mockUserCreateFn = vi.fn();
-  const mockUserFindManyFn = vi.fn();
   const mockMembershipCreateFn = vi.fn();
-  const mockMembershipFindManyFn = vi.fn();
-  const mockMembershipUpdateManyFn = vi.fn();
-  const mockAttributeFindManyFn = vi.fn();
-  const mockProcessUserAttributesFn = vi.fn();
-  const mockTransactionFn = vi.fn(async (callbackOrArray: any) => {
-    if (Array.isArray(callbackOrArray)) {
-      return Promise.all(callbackOrArray);
-    }
-    return callbackOrArray({
+  const mockTransactionFn = vi.fn(async (callback: (tx: any) => Promise<unknown>) => {
+    return callback({
       user: {
         create: mockUserCreateFn,
       },
@@ -53,12 +36,7 @@ const {
   return {
     mockCreateMany: mockCreateManyFn,
     mockUserCreate: mockUserCreateFn,
-    mockUserFindMany: mockUserFindManyFn,
     mockMembershipCreate: mockMembershipCreateFn,
-    mockMembershipFindMany: mockMembershipFindManyFn,
-    mockMembershipUpdateMany: mockMembershipUpdateManyFn,
-    mockAttributeFindMany: mockAttributeFindManyFn,
-    mockProcessUserAttributes: mockProcessUserAttributesFn,
     mockTransaction: mockTransactionFn,
   };
 });
@@ -68,24 +46,14 @@ vi.mock("@calcom/prisma", () => {
     prisma: {
       membership: {
         createMany: mockCreateMany,
-        findMany: mockMembershipFindMany,
-        updateMany: mockMembershipUpdateMany,
       },
       user: {
         create: mockUserCreate,
-        findMany: mockUserFindMany,
-      },
-      attribute: {
-        findMany: mockAttributeFindMany,
       },
       $transaction: mockTransaction,
     },
   };
 });
-
-vi.mock("../../attributes/attributeUtils", () => ({
-  processUserAttributes: (...args: unknown[]) => mockProcessUserAttributes(...args),
-}));
 
 vi.mock("@calcom/features/pbac/utils/isOrganisationAdmin", () => {
   return {
