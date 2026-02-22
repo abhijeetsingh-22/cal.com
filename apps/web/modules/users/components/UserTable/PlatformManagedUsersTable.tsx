@@ -1,6 +1,5 @@
 "use client";
 
-import { DataTableProvider, useColumnFilters, useDataTable } from "@calcom/features/data-table";
 import { getUserAvatarUrl } from "@calcom/lib/getAvatarUrl";
 import { useLocale } from "@calcom/lib/hooks/useLocale";
 import { trpc } from "@calcom/trpc/react";
@@ -18,6 +17,9 @@ import {
   DataTableToolbar,
   DataTableWrapper,
 } from "~/data-table/components";
+import { DataTableProvider } from "~/data-table/DataTableProvider";
+import { useColumnFilters } from "~/data-table/hooks/useColumnFilters";
+import { useDataTable } from "~/data-table/hooks/useDataTable";
 import { useSegments } from "~/data-table/hooks/useSegments";
 import { DeleteBulkUsers } from "./BulkActions/DeleteBulkUsers";
 import { DeleteMemberModal } from "./DeleteMemberModal";
