@@ -333,7 +333,7 @@ export function ImportMembersModal(props: Props) {
               type="submit"
               loading={importMembersMutation.isPending}
               disabled={parsedUsers.length === 0 || importMembersMutation.isPending}>
-              {t("send_invite")}
+              {t("import")}
             </Button>
           </DialogFooter>
         </Form>
